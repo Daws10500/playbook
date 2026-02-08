@@ -167,7 +167,28 @@
   .pos-cell {
     background:var(--surface); border-radius:10px; padding:10px 4px; text-align:center;
     border:2px solid var(--border); transition:background .3s, border-color .3s;
+    cursor:pointer; -webkit-user-select:none; user-select:none;
   }
+  .pos-cell:active { transform:scale(0.95); opacity:0.8; }
+
+  .picker-title { display:flex; align-items:center; gap:8px; margin-bottom:16px; }
+  .picker-title h3 { margin:0; }
+  .picker-pos-dot { width:12px; height:12px; border-radius:50%; display:inline-block; }
+  .picker-list { list-style:none; padding:0; margin:0; }
+  .picker-list li {
+    padding:14px 16px; border-radius:10px; margin-bottom:6px; cursor:pointer;
+    display:flex; justify-content:space-between; align-items:center;
+    background:var(--surface2); transition:background .15s; font-weight:600; font-size:15px;
+  }
+  .picker-list li:active { background:var(--border); }
+  .picker-list li .picker-num { font-size:13px; color:var(--text2); font-weight:500; }
+  .picker-list li.picker-current { border:2px solid var(--green); background:rgba(0,184,148,0.1); }
+  .picker-clear {
+    padding:14px 16px; border-radius:10px; margin-top:8px; cursor:pointer;
+    text-align:center; font-weight:600; font-size:14px; color:var(--red);
+    background:rgba(225,112,85,0.1); transition:background .15s;
+  }
+  .picker-clear:active { background:rgba(225,112,85,0.25); }
   .pos-label {
     font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:1px;
     margin-bottom:4px; display:flex; align-items:center; justify-content:center; gap:3px;
@@ -1072,7 +1093,7 @@ function showPlay(num) {
   const grid = document.getElementById('playerGrid');
   grid.innerHTML = ['C','Q','W','X','Y','Z'].map(pos => {
     const pc = posColors[pos];
-    return `<div class="pos-cell" style="border-color:${pc ? pc.color : 'var(--border)'}">
+    return `<div class="pos-cell" style="border-color:${pc ? pc.color : 'var(--border)'}" onclick="showPlayerPicker(${play.num},'${pos}')">
       <div class="pos-label" style="color:${pc ? pc.color : 'var(--accent)'}">${posDot(pos)} ${pos}</div>
       <div class="pos-player">${play[pos] || '-'}</div></div>`;
   }).join('');
@@ -1321,6 +1342,51 @@ function logCall(playNum, result) {
 }
 
 function endGame() { activeGameId = null; renderGames(); }
+
+// ============= PLAYER PICKER =============
+function showPlayerPicker(playNum, pos) {
+  const play = plays.find(p => p.num === playNum);
+  if (!play) return;
+  const pc = posColors[pos];
+  const color = pc ? pc.color : 'var(--accent)';
+  // Filter roster for players eligible at this position
+  const eligible = roster.filter(p => {
+    const poss = p.positions ? p.positions.split(',').map(x => x.trim()) : [];
+    return poss.includes(pos);
+  });
+  // Get last name for display matching (plays store last names)
+  const currentPlayer = play[pos] || '';
+  let html = `<div class="picker-title">
+    <span class="picker-pos-dot" style="background:${color}"></span>
+    <h3>${pos} — Select Player</h3></div>`;
+  if (eligible.length === 0) {
+    html += '<p style="color:var(--text2);font-size:14px;">No eligible players for this position.</p>';
+  } else {
+    html += '<ul class="picker-list">';
+    eligible.forEach(p => {
+      const lastName = p.name.split(' ').pop();
+      const isCurrent = currentPlayer === lastName;
+      html += `<li class="${isCurrent ? 'picker-current' : ''}" onclick="assignPlayer(${playNum},'${pos}','${lastName}')">
+        <span>${lastName}</span>
+        <span class="picker-num">${p.number ? '#' + p.number : ''}</span></li>`;
+    });
+    html += '</ul>';
+    if (currentPlayer) {
+      html += `<div class="picker-clear" onclick="assignPlayer(${playNum},'${pos}','')">Clear Assignment</div>`;
+    }
+  }
+  document.getElementById('modalBox').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('active');
+}
+
+function assignPlayer(playNum, pos, playerName) {
+  const play = plays.find(p => p.num === playNum);
+  if (!play) return;
+  play[pos] = playerName;
+  savePlays();
+  document.getElementById('modalOverlay').classList.remove('active');
+  showPlay(playNum);
+}
 
 // ============= MODAL =============
 function closeModal(e) { if (e.target.id === 'modalOverlay') document.getElementById('modalOverlay').classList.remove('active'); }
