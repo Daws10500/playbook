@@ -1,0 +1,497 @@
+youth_flag_football:
+  meta:
+    version: 1.0
+    description: General youth flag football knowledge for LLM ingestion, including rules, skills, and offensive tactics.
+    typical_formats:
+      - "5v5"
+      - "6v6"
+    typical_age_groups:
+      - "6-8"
+      - "9-11"
+      - "12-14"
+
+  overview:
+    summary: >
+      Flag football is a non-contact version of American football where defenders stop the ball carrier
+      by pulling a flag from a belt instead of tackling.
+    emphasis:
+      - "Speed and agility."
+      - "Basic football strategy and decision-making."
+      - "Reduced collision risk for kids."
+    common_league_features:
+      - "5v5 or 6v6 on a reduced-size field."
+      - "Co-ed teams grouped by age divisions."
+      - "Running clock games, often 2x20–25 minute halves."
+
+  field_equipment_and_players:
+    field:
+      size:
+        width_yards: "25-30"
+        length_yards_including_end_zones: "60-70"
+        end_zone_depth_yards: 10
+      markings:
+        has_midfield_line_as_first_down: true
+        has_no_run_zones: true
+        no_run_zone_distance_from_goal_or_midfield_yards: 5
+
+    equipment:
+      ball_sizes:
+        - age_range: "younger"
+          size: "youth or junior ball"
+      flags:
+        flags_per_belt: 2  # or 3 in some leagues
+        notes:
+          - "Flags at the hips; colors contrast with shorts."
+      safety:
+        mouthguard_required: true
+        footwear: "Soft cleats or athletic shoes; metal cleats often prohibited."
+      jerseys:
+        must_be_tucked: true
+        reason: "Keep flags visible and unobstructed."
+
+    players_and_positions:
+      typical_minimum_players_to_start: 4
+      typical_roster_size_note: "Small rosters may play short-handed if needed."
+      common_positions:
+        - name: "Quarterback"
+          abbreviation: "QB"
+          responsibilities:
+            - "Receive snap from center."
+            - "Throw forward passes or hand off the ball."
+        - name: "Center"
+          responsibilities:
+            - "Snap the ball to the QB."
+            - "Release into short route in many formats."
+        - name: "Receiver"
+          responsibilities:
+            - "Run routes and catch passes."
+        - name: "Running Back"
+          responsibilities:
+            - "Take handoffs or short passes and run with the ball."
+        - name: "Defender"
+          responsibilities:
+            - "Coverage (man or zone) and flag pulling."
+            - "Occasional rushing of QB if aligned correctly."
+
+  rules_of_play:
+    core_non_contact_principles:
+      - "No tackling, blocking, or physical screening."
+      - "Defenders stop the play by pulling a flag, not by taking players to the ground."
+      - "No flag guarding: ball carriers cannot use hands, arms, or the ball to block access to flags."
+
+    possessions_and_game_start:
+      coin_toss_usage: "Decides offense/defense or direction."
+      kickoffs:
+        typically_used: false
+        starting_spot_examples:
+          - "Own 5-yard line"
+          - "Own 10-yard line"
+          - "Own 20-yard line"
+
+    downs_and_first_downs:
+      typical_down_structure:
+        initial_series_yards_to_gain: "Midfield from starting line"
+        second_series_yards_to_gain: "Goal line from midfield"
+        downs_per_zone: 4
+      no_run_zones:
+        enforced: true
+        description: "Within about 5 yards of midfield or goal line, plays must be passes."
+
+    passing_and_running:
+      forward_pass_rules:
+        max_forward_passes_per_play: 1
+        must_cross_los: true
+        pass_clock_seconds_example: 7
+      handoffs_and_laterals:
+        direct_handoffs_allowed: true
+        backward_pitches_allowed: true
+      qb_running:
+        qb_may_cross_los_only_after_handoff_in_many_leagues: true
+
+    defense_and_rush:
+      rush_distance_yards_example: 7
+      rush_rules:
+        - "Defenders rushing the QB must start at or beyond the rush marker (e.g., 7 yards from LOS)."
+        - "Once the ball is handed off or pitched, any defender may cross the line."
+      contact_restrictions:
+        - "No holding or pushing receivers."
+        - "No blocking or screening the ball carrier."
+
+  scoring_and_game_management:
+    scoring_values:
+      touchdown: 6
+      extra_point_short:
+        points: 1
+        typical_distance_yards: 5
+      extra_point_long:
+        points: 2
+        typical_distance_yards: 10
+      safety: 2
+      defensive_return_on_conversion:
+        enabled_in_many_leagues: true
+        description: "Defense may return an interception on extra point for 2 points."
+
+    timing:
+      halves:
+        count: 2
+        duration_minutes_each: "20-25"
+      halftime_length_minutes: "5-10"
+      clock_type: "Running clock with limited stoppages (timeouts, injuries, administration)."
+      timeouts_per_half_example: 2
+
+    overtime:
+      regular_season:
+        often_allow_ties: true
+      playoff_overtime_examples:
+        - "Each team gets one possession from a fixed yard line; higher score wins."
+
+  penalties:
+    common_offensive_penalties:
+      - name: "Flag guarding"
+        description: "Using hands, arms, or ball to prevent defenders from grabbing flags."
+      - name: "Illegal screening or blocking"
+        description: "Using body to impede defender instead of running a legal route."
+      - name: "Charging"
+        description: "Lowering shoulder or running through a defender rather than avoiding contact."
+      - name: "False start"
+        description: "Offensive player moves illegally after set and before snap."
+
+    common_defensive_penalties:
+      - name: "Holding / illegal contact"
+        description: "Grabbing or significantly impeding a receiver or ball carrier."
+      - name: "Offside"
+        description: "Crossing the line of scrimmage before the snap."
+      - name: "Illegal rush"
+        description: "Rushing from inside required distance or without proper alignment."
+
+    enforcement_general_note: "Penalties usually result in yardage plus potential automatic first down for some fouls."
+
+  skills_and_coaching:
+    practice_structure:
+      typical_practice_flow:
+        - "Warm-up: light running, dynamic stretching, simple tag/flag games."
+        - "Individual skills: flag pulling, passing, catching, footwork, agility."
+        - "Group drills: routes versus air, basic coverage alignments, small-sided games."
+        - "Short scrimmage plus review and encouragement at the end."
+
+    offensive_skills:
+      qb_skills:
+        - "Proper grip and stance."
+        - "Step-and-throw mechanics with follow-through."
+        - "Simple progression reads (first read, second read, checkdown)."
+      receiver_skills:
+        - "Catching with hands extended, eyes on ball."
+        - "'Diamond' or 'alligator' hand techniques depending on pass height."
+        - "Tuck ball quickly after catch and protect flags."
+      route_tree_basics:
+        - "Slant"
+        - "Out"
+        - "In / dig"
+        - "Curl / hook"
+        - "Post"
+        - "Corner / flag"
+        - "Go / fly"
+
+    defensive_skills:
+      flag_pulling:
+        key_points:
+          - "Short, controlled steps approaching ball carrier."
+          - "Eyes on hips instead of ball."
+          - "Grab and pull flag firmly; avoid wild swipes."
+      coverage_basics:
+        man_coverage:
+          - "Line up between receiver and end zone."
+          - "Maintain cushion and watch hips, not fakes."
+        zone_coverage:
+          - "Drop to assigned area and watch QB eyes."
+          - "Break on the ball once thrown, not before."
+
+  safety_sportsmanship_philosophy:
+    safety:
+      - "Reinforce non-contact; players must avoid collisions and slow near traffic."
+      - "Teach controlled flag pulls instead of diving into opponents."
+    sportsmanship:
+      - "Shake hands before/after games; praise effort from both teams."
+      - "Respect officials and opponents; no taunting."
+    developmental_philosophy:
+      - "Rotate players through multiple positions to broaden learning."
+      - "Prioritize fun, fundamentals, and confidence over wins and losses."
+
+  offensive_tactics:
+    principles:
+      core:
+        - "Small, versatile playbook: 6–10 core plays with mirrored and tagged variations."
+        - "Call plays your group can execute under pressure, even if simple."
+        - "Use formations, motion, and route combos to move defenders, then attack resulting space."
+        - "Show the same formation repeatedly while running different concepts to avoid defensive anticipation."
+      example_series:
+        description: "Run Trips Right three times but target different routes each time (slant, out, go) to prevent pattern recognition."
+
+    formations_and_mismatches:
+      common_formations:
+        - name: "Spread"
+          structure: "Two receivers on each side, center in middle."
+          usage:
+            - "Clear middle for quick slants, hooks, or RB draws."
+        - name: "Trips"
+          structure: "Three receivers on one side, one on the other."
+          usage:
+            - "Overload one side and force coverage communication on crossers and floods."
+        - name: "Bunch"
+          structure: "Three receivers tightly grouped in a triangle."
+          usage:
+            - "Create natural traffic at the snap to free a short route."
+        - name: "Stack"
+          structure: "Two receivers lined up directly behind each other."
+          usage:
+            - "Hide release direction and stress man coverage assignments."
+      mismatch_principles:
+        - "Place best athlete on weaker defender, often isolated opposite trips."
+        - "Use deep clears by fast players to open underneath routes for others."
+
+    motion_and_pre_snap_deception:
+      concepts:
+        benefits:
+          - "Helps identify man vs zone coverage via defender reactions."
+          - "Forces defense to adjust alignment late, increasing chances of miscommunication."
+          - "Allows same core play to be run from multiple looks."
+        common_motions:
+          - name: "Jet"
+            description: "Receiver runs across formation before snap, threatening quick handoff or flat route."
+          - name: "Slide"
+            description: "Receiver shifts a few steps to build or break a bunch/trips look just before snap."
+
+    route_combinations:
+      high_percentage_combos:
+        - name: "Slant + Out"
+          description: "One receiver slants inside, another runs quick out; defenders may collide or hesitate in man coverage."
+        - name: "Post + Corner"
+          description: "Inside receiver runs post, outside runs corner, forcing deep defenders to switch or lose leverage."
+        - name: "Go + Under"
+          description: "Outside go clears deep coverage; inside drag/under exploits space behind shallow defenders."
+        - name: "Levels"
+          description: "Short route at 3–5 yards plus deeper route at 8–10 on same side to stress one zone defender vertically."
+      qb_read_guidelines:
+        - "Limit to one or two reads for youth QBs (e.g., short route first, then deep)."
+        - "Coach pre-snap ideas: know primary matchup and coverage clue before snap."
+
+    attacking_common_defenses:
+      vs_man:
+        defensive_profile: "Man-to-man with one dedicated rusher is standard at youth levels."
+        tactics:
+          - "Use stacks/bunches to create traffic and natural rubs at release (within rules)."
+          - "Exploit weakest defender by isolating your best receiver."
+          - "Use motion to drag defenders away from intended target and throw back into vacated area."
+      vs_zone:
+        defensive_profile: "Simple 2-short / 2-deep or umbrella-style zones are common."
+        tactics:
+          - "Flood one side with multiple routes at different depths (flat, corner, go)."
+          - "Sit receivers between zones or just behind shallow defenders."
+          - "Throw quickly into the area vacated by a rusher."
+
+    game_winning_and_deception_sequences:
+      setup_and_counter_pattern:
+        steps:
+          - "Call a safe, quick concept several times (e.g., quick out to your best receiver from trips)."
+          - "Observe defense overplaying route or side (corner jumping out, safety shading)."
+          - "Call a complementary shot from same look (e.g., out-and-up, post behind jumped out, wheel route up sideline)."
+      end_game_situations:
+        tactics:
+          - "Use misdirection screens: show quick screen one way, then throw slant/post behind flowing defenders."
+          - "Use sideline routes (outs, comebacks) to gain yards and stop clock before final shot."
+          - "In no-run zone near goal line, scheme crossing routes that quickly separate at the goal line."
+
+    simplified_play_calling_framework:
+      naming_structure:
+        formation_word: "Spread | Trips | Bunch | Stack"
+        concept_word: "Slant-Out | Levels | Flood | Go-Under"
+        optional_tag: "Motion (Jet, Slide) or primary read (e.g., Z)"
+      examples:
+        - call: "Trips Right Slant-Out Z"
+          meaning: "Trips right formation, slant/out combo, Z receiver is primary read."
+        - call: "Bunch Left Flood Jet"
+          meaning: "Bunch left, flood concept on that side, with jet motion across before snap."
+      llm_guideline: >
+        When generating new plays, prioritize clarity and age-appropriate complexity, but systematically apply
+        formation, motion, and route-combination concepts to stress defenses rather than relying on random routes.
+
+  route_tree:
+    description: >
+      Standard football route tree with numbered routes and simple, youth-friendly definitions.
+      Depths are approximate and should be adjusted to arm strength and age level.
+    depth_guidance_yards:
+      short: "0-5"
+      intermediate: "6-10"
+      deep: "10+"
+    numbering_convention: >
+      Even numbers generally break inside, odd numbers break outside, and the go/fade is straight
+      downfield. Systems vary slightly, but this pattern is common.
+    routes:
+      - number: 0
+        name: "Hitch / Stop"
+        depth_yards: "4-6"
+        break_direction: "Back toward quarterback"
+        description: >
+          Receiver drives vertically to about 4–6 yards, then quickly stops and turns back to
+          the QB, presenting hands for an easy throw. Often used vs off coverage.
+      - number: 1
+        name: "Flat"
+        depth_yards: "1-3"
+        break_direction: "Outside toward sideline"
+        description: >
+          Quick route where receiver takes a short release then runs almost horizontally toward
+          the sideline. Common for RBs and slots as a quick outlet.
+      - number: 2
+        name: "Slant"
+        depth_yards: "3-5"
+        break_direction: "Inside toward middle"
+        description: >
+          Receiver takes a few vertical steps, then plants and cuts at a 45-degree angle toward
+          the middle of the field. Fast-hitting route vs man or soft inside leverage.
+      - number: 3
+        name: "Comeback"
+        depth_yards: "10-12"
+        break_direction: "Back toward sideline"
+        description: >
+          Receiver pushes vertically, threatening deep, then plants and breaks back toward the
+          sideline and QB at about 45 degrees. Effective vs deep outside coverage.
+      - number: 4
+        name: "Curl / Hook"
+        depth_yards: "8-12"
+        break_direction: "Back toward quarterback (inside)"
+        description: >
+          Receiver runs vertically then settles down by turning back inside toward the QB,
+          sitting in a soft spot between zone defenders.
+      - number: 5
+        name: "Out"
+        depth_yards: "8-10"
+        break_direction: "Outside toward sideline"
+        description: >
+          Receiver runs vertically to 8–10 yards then breaks sharply at 90 degrees toward the
+          sideline. Great for sideline throws and two-minute situations.
+      - number: 6
+        name: "Dig / In"
+        depth_yards: "10-15"
+        break_direction: "Inside toward middle"
+        description: >
+          Deeper version of a slant: receiver pushes vertically, then makes a hard cut at 90
+          degrees across the field. Attacks intermediate middle vs zone.
+      - number: 7
+        name: "Corner / Flag"
+        depth_yards: "12-20"
+        break_direction: "Outside toward corner of field"
+        description: >
+          Receiver stems vertically, then angles toward the back corner of the field or end zone.
+          Stretches deep outside zones and is a key red-zone route.
+      - number: 8
+        name: "Post"
+        depth_yards: "12-20"
+        break_direction: "Inside toward goalpost"
+        description: >
+          Receiver runs vertically, then cuts at a 45-degree angle toward the goalpost, attacking
+          deep middle behind safeties or between them.
+      - number: 9
+        name: "Go / Fade / Fly"
+        depth_yards: "Deep (15+)"
+        break_direction: "Straight upfield"
+        description: >
+          Receiver accelerates straight downfield, sometimes leaning slightly toward the seam or
+          sideline, trying to run past coverage for a vertical shot.
+      - number: "RB-Angle"
+        name: "Angle"
+        depth_yards: "3-6"
+        break_direction: "Out then sharply back inside"
+        description: >
+          Typically run by a back: starts with a short release toward the flat, then plants and
+          cuts back inside across the middle for a quick separation route.
+      - number: "RB-Swing"
+        name: "Swing"
+        depth_yards: "Behind LOS to 3"
+        break_direction: "Outside, slightly upfield"
+        description: >
+          Back flares wide from the backfield toward the sideline, giving an easy horizontal
+          throw with room to run after the catch.
+    ascii_diagram:
+      note: >
+        This is a simplified text "map" of the tree from the offense's perspective: LOS at the bottom,
+        end zone at the top, left/right show outside/inside breaks.
+      diagram: |
+        Key:
+          QB at bottom center. All routes start at the line of scrimmage (LOS) and move upward.
+          Left/right arrows show breaks toward sideline or middle.
+                           8  Post
+                            \
+                             \
+                  7 Corner     \   9 Go / Fade
+                   \            |
+                    \           |
+                     \          |
+                      \         |
+                       \        |
+                        \       |
+            5 Out         \     |      6 Dig / In
+              ─────────┐   \    |    ┌───────────
+                       |    \   |   /
+                       |     \  |  /
+                       |      \ | /
+                       |       \|/
+                       |        |
+            1 Flat     |        |      2 Slant
+           ────────────┘        └───────────\
+                                             \
+                                              \
+                                               \
+                       0 Hitch / Stop (turn back to QB)
+                           ↑
+                           |
+                           |
+                         QB / LOS
+        Additional RB routes:
+          Angle: start like Flat (1) to outside, then cut back sharply across middle.
+          Swing: bubble path wide toward sideline from backfield, staying shallow.
+    llm_usage_notes:
+      - "Use the numeric system to let plays specify exact routes per receiver, e.g., 'Trips Right 2-9-5' for three receivers."
+      - "When teaching youth, emphasize the names (slant, out, go) first, then gradually introduce numbers."
+      - "Route depths should be scaled down for age and QB arm strength; maintain relative relationships (short vs intermediate vs deep)."
+
+  sample_text_plays:
+    trips_right_slant_out:
+      situation: "Any down, medium yardage, especially vs man coverage."
+      formation: "Trips Right"
+      assignments:
+        center: "Snap then 5-yard hook over middle."
+        inside_right_receiver: "3–5 yard slant across middle."
+        middle_right_receiver: "5-yard out toward right sideline."
+        outside_right_receiver: "Go route to clear deep coverage."
+        left_receiver: "5-yard hook or crossing route as outlet."
+      qb_read: "Slant first, then out, then hook."
+
+    trips_right_go_under:
+      situation: "Need chunk yardage vs zone."
+      formation: "Trips Right"
+      assignments:
+        outside_trips_receiver: "Go route to clear deep defenders."
+        middle_trips_receiver: "Shallow drag at 3–4 yards across field (under route)."
+        inside_trips_receiver: "10-yard corner route into sideline window."
+        backside_receiver: "Post or deep dig to occupy backside safety."
+      qb_read: "Look corner vs soft zone; if covered, hit shallow drag underneath."
+
+    misdirection_jet_screen:
+      situation: "End-of-game, defense overpursuing motion."
+      formation: "Spread"
+      motion: "Jet motion by slot receiver across formation."
+      fake_side: "Quick screen look to motion player."
+      actual_target: "Slant/post on opposite side behind rotating defenders."
+      coaching_point: "Sell screen with eyes and initial QB turn, then quickly reset and throw back."
+
+  ingestion_notes:
+    rule_scope_note: >
+      Rules and values here reflect common youth and NFL FLAG–style standards but may differ from specific leagues;
+      league rulebooks should override these defaults when available.
+    customization_suggestions:
+      - "Override field dimensions, timing, and scoring from official league documents as needed."
+      - "Parameterize age group and format (5v5 vs 6v6) when generating drills or plays."
+    content_guidelines_for_children:
+      - "Use clear, simple language and avoid technical jargon."
+      - "Emphasize safety, teamwork, and sportsmanship in all generated content."
+      - "Favor repetition and small number of core concepts over large complex playbooks."

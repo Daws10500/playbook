@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Excel temp and lock files
+~$*
+.~lock.*
+
+# Optional: uncomment to ignore large backups
+# *_backup*.xlsx
+# *_backup*.xlsm
