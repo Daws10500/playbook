@@ -1833,6 +1833,9 @@ function showPlayerPicker(playNum, pos) {
   });
   // Get last name for display matching (plays store last names)
   const currentPlayer = play[pos] || '';
+  // Find players already assigned to OTHER positions on this play
+  const otherPositions = ['C','Q','W','X','Y','Z'].filter(p => p !== pos);
+  const alreadyAssigned = otherPositions.map(p => play[p]).filter(n => n);
   let html = `<div class="picker-title">
     <span class="picker-pos-dot" style="background:${color}"></span>
     <h3>${pos} — Select Player</h3></div>`;
@@ -1843,9 +1846,17 @@ function showPlayerPicker(playNum, pos) {
     eligible.forEach(p => {
       const lastName = p.name.split(' ').pop();
       const isCurrent = currentPlayer === lastName;
-      html += `<li class="${isCurrent ? 'picker-current' : ''}" onclick="assignPlayer(${playNum},'${pos}','${lastName}')">
-        <span>${lastName}</span>
-        <span class="picker-num">${p.number ? '#' + p.number : ''}</span></li>`;
+      const takenByPos = otherPositions.find(op => play[op] === lastName);
+      if (takenByPos && !isCurrent) {
+        // Player already assigned to another position — show greyed out
+        html += `<li style="opacity:0.4;cursor:default;pointer-events:none;">
+          <span>${lastName} <span style="font-size:12px;color:var(--text2);">(at ${takenByPos})</span></span>
+          <span class="picker-num">${p.number ? '#' + p.number : ''}</span></li>`;
+      } else {
+        html += `<li class="${isCurrent ? 'picker-current' : ''}" onclick="assignPlayer(${playNum},'${pos}','${lastName}')">
+          <span>${lastName}</span>
+          <span class="picker-num">${p.number ? '#' + p.number : ''}</span></li>`;
+      }
     });
     html += '</ul>';
     if (currentPlayer) {
