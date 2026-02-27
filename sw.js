@@ -1,4 +1,4 @@
-const CACHE_NAME = 'playbook-v2';
+const CACHE_NAME = 'playbook-v6';
 const ASSETS = ['./', './index.html'];
 
 self.addEventListener('install', e => {
@@ -15,10 +15,10 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   e.respondWith(
-    caches.match(e.request).then(r => r || fetch(e.request).then(resp => {
+    fetch(e.request).then(resp => {
       const clone = resp.clone();
       caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
       return resp;
-    })).catch(() => caches.match('./index.html'))
+    }).catch(() => caches.match(e.request).then(r => r || caches.match('./index.html')))
   );
 });
