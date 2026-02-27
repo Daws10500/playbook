@@ -1,4 +1,4 @@
-const CACHE_NAME = 'playbook-v7';
+const CACHE_NAME = 'playbook-v8';
 const ASSETS = ['./', './index.html'];
 
 self.addEventListener('install', e => {

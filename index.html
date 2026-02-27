@@ -420,6 +420,86 @@
   .call-log-text { flex:1; }
   .call-log-time { font-size:11px; color:var(--text2); }
 
+  /* ========= GAME SEQUENCE BUILDER ========= */
+  .seq-card {
+    display:flex; align-items:center; gap:8px;
+    padding:10px 12px; margin:3px 12px;
+    background:var(--surface); border-radius:var(--radius);
+    transition:all .15s; border:1px solid transparent;
+  }
+  .seq-card:active { transform:scale(0.98); }
+  .seq-card.seq-success { border-left:3px solid var(--green); }
+  .seq-card.seq-fail { border-left:3px solid var(--red); }
+  .seq-order {
+    width:26px; height:26px; border-radius:7px; background:var(--surface2);
+    display:flex; align-items:center; justify-content:center;
+    font-size:12px; font-weight:800; color:var(--accent); flex-shrink:0;
+  }
+  .seq-info { flex:1; min-width:0; cursor:pointer; }
+  .seq-name { font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .seq-players { font-size:11px; color:var(--text2); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .seq-actions { display:flex; gap:4px; flex-shrink:0; align-items:center; }
+  .seq-btn {
+    width:30px; height:30px; border-radius:7px; border:none;
+    display:flex; align-items:center; justify-content:center;
+    font-size:13px; cursor:pointer; transition:all .12s;
+    background:var(--surface2); color:var(--text2);
+  }
+  .seq-btn:active { transform:scale(0.9); }
+  .seq-btn.seq-up, .seq-btn.seq-down { font-size:14px; font-weight:700; }
+  .seq-btn.seq-check { background:rgba(0,184,148,0.15); color:var(--green); }
+  .seq-btn.seq-check.active { background:var(--green); color:#fff; }
+  .seq-btn.seq-x { background:rgba(225,112,85,0.15); color:var(--red); }
+  .seq-btn.seq-x.active { background:var(--red); color:#fff; }
+  .seq-btn.seq-remove { font-size:16px; }
+  .seq-result-badge {
+    font-size:11px; font-weight:700; padding:2px 6px; border-radius:4px; flex-shrink:0;
+  }
+  .seq-result-badge.success { background:rgba(0,184,148,0.2); color:var(--green); }
+  .seq-result-badge.fail { background:rgba(225,112,85,0.2); color:var(--red); }
+  .seq-add-bar {
+    padding:10px 16px;
+  }
+  .seq-add-btn {
+    width:100%; padding:12px; border-radius:10px; border:1px dashed var(--border);
+    background:transparent; color:var(--accent); font-size:14px; font-weight:600;
+    cursor:pointer; transition:all .15s;
+  }
+  .seq-add-btn:hover { border-color:var(--accent); background:rgba(79,140,255,0.05); }
+  .seq-add-btn:active { transform:scale(0.98); }
+  .seq-play-picker {
+    max-height:50vh; overflow-y:auto; padding:8px 0;
+  }
+  .seq-pick-item {
+    display:flex; align-items:center; gap:10px;
+    padding:10px 16px; cursor:pointer; transition:background .12s;
+  }
+  .seq-pick-item:active { background:var(--surface2); }
+  .seq-pick-num {
+    width:28px; height:28px; border-radius:7px; background:var(--surface2);
+    display:flex; align-items:center; justify-content:center;
+    font-size:12px; font-weight:800; color:var(--accent); flex-shrink:0;
+  }
+  .seq-pick-name { font-size:14px; font-weight:500; }
+  .seq-detail-back {
+    display:flex; align-items:center; gap:8px; padding:12px 16px;
+    background:var(--surface); border-bottom:1px solid var(--border);
+  }
+  .seq-detail-back button { font-size:12px; }
+  .seq-detail-grid {
+    display:grid; grid-template-columns:repeat(3,1fr); gap:6px; padding:12px 16px;
+  }
+  .seq-pos-cell {
+    padding:10px 8px; border-radius:10px; text-align:center;
+    background:var(--surface); border:1px solid var(--border); cursor:pointer;
+    transition:all .15s;
+  }
+  .seq-pos-cell:active { transform:scale(0.96); }
+  .seq-pos-label { font-size:12px; font-weight:700; margin-bottom:2px; }
+  .seq-pos-player { font-size:13px; color:var(--text2); }
+  .seq-diagram-section { padding:12px 16px; }
+  .seq-diagram-section img { width:100%; border-radius:10px; }
+
   /* ========= SEARCH BAR ========= */
   .search-bar { padding:8px 12px; }
   .search-bar input {
@@ -964,7 +1044,7 @@ function loadTheme() {
 
 // ============= PERSISTENCE =============
 function savePlays() { try { localStorage.setItem('playbook_plays', JSON.stringify(plays)); } catch(e) { alert('Storage full! Try removing some custom diagrams.'); } }
-const PLAYBOOK_VERSION = 'v7-20plays';
+const PLAYBOOK_VERSION = 'v8-gamesequence';
 function loadPlays() {
   try {
     const ver = localStorage.getItem('playbook_version');
@@ -1851,10 +1931,13 @@ function openGame(id) { activeGameId = id; renderGames(); }
 function renderActiveGame() {
   const game = games.find(g=>g.id===activeGameId);
   if (!game) { activeGameId = null; renderGames(); return; }
+  // Ensure calls array exists
+  if (!game.calls) game.calls = [];
   const total = game.calls.length;
-  const wins = game.calls.filter(c=>c.result==='SUCCESS').length;
-  const fails = total - wins;
-  const rate = total > 0 ? Math.round(wins/total*100) : 0;
+  const marked = game.calls.filter(c => c.result);
+  const wins = marked.filter(c => c.result === 'SUCCESS').length;
+  const fails = marked.filter(c => c.result === 'FAIL').length;
+  const rate = marked.length > 0 ? Math.round(wins / marked.length * 100) : 0;
 
   let html = `<div class="active-game-header">
     <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -1863,46 +1946,205 @@ function renderActiveGame() {
     </div>
     <div class="game-sub">${game.date}</div>
     <div class="active-game-stats">
-      <div class="stat-chip stat-called">${total} Called</div>
+      <div class="stat-chip stat-called">${total} Plays</div>
       <div class="stat-chip stat-success">${wins} &#10003;</div>
       <div class="stat-chip stat-fail">${fails} &#10007;</div>
       <div class="stat-chip stat-rate">${rate}%</div>
     </div></div>`;
 
-  // Call log (recent first)
+  // Play sequence list
   if (game.calls.length > 0) {
-    html += '<div style="padding:10px 16px 4px;"><h3 style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;">Play Log</h3></div><div class="call-log">';
-    game.calls.slice().reverse().forEach((c, i) => {
-      const play = plays.find(p=>p.num===c.playNum);
-      const name = play ? play.type : 'Play #'+c.playNum;
-      html += `<div class="call-log-item">
-        <div class="call-log-result ${c.result==='SUCCESS'?'success':'fail'}"></div>
-        <div class="call-log-text">#${c.playNum} ${name}</div>
-        <div class="call-log-time">${c.result}</div></div>`;
+    html += '<div style="padding:10px 16px 4px;"><h3 style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;">Play Sequence</h3></div>';
+    game.calls.forEach((c, i) => {
+      const play = plays.find(p => p.type === c.playType) || plays.find(p => p.num === c.playNum);
+      const name = c.playType || (play ? play.type : 'Play #' + c.playNum);
+      // Build player summary
+      const positions = ['C','Q','W','X','Y','Z'];
+      const assigned = positions.filter(pos => c[pos]).map(pos => pos + ':' + c[pos]);
+      const playerSummary = assigned.length > 0 ? assigned.join(' · ') : 'No players assigned';
+      const resultClass = c.result === 'SUCCESS' ? 'seq-success' : c.result === 'FAIL' ? 'seq-fail' : '';
+      html += `<div class="seq-card ${resultClass}">
+        <div class="seq-order">${i + 1}</div>
+        <div class="seq-info" onclick="showGamePlayDetail(${i})">
+          <div class="seq-name">${name}</div>
+          <div class="seq-players">${playerSummary}</div>
+        </div>
+        <div class="seq-actions">
+          <button class="seq-btn seq-check ${c.result==='SUCCESS'?'active':''}" onclick="markGameCall(${i},'SUCCESS')" title="Success">&#10003;</button>
+          <button class="seq-btn seq-x ${c.result==='FAIL'?'active':''}" onclick="markGameCall(${i},'FAIL')" title="Fail">&#10007;</button>
+          <button class="seq-btn seq-up" onclick="moveGameCall(${i},-1)" title="Move up" ${i===0?'disabled':''}>&#9650;</button>
+          <button class="seq-btn seq-down" onclick="moveGameCall(${i},1)" title="Move down" ${i===game.calls.length-1?'disabled':''}>&#9660;</button>
+          <button class="seq-btn seq-remove" onclick="removeGameCall(${i})" title="Remove">&#215;</button>
+        </div>
+      </div>`;
     });
-    html += '</div>';
+  } else {
+    html += '<div class="empty-state" style="padding:30px 0;"><div class="icon">&#128203;</div><div>No plays added yet.<br>Tap below to build your sequence!</div></div>';
   }
 
-  // Play selection
-  html += '<div style="padding:10px 16px 4px;"><h3 style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;">Call a Play</h3></div>';
-  plays.forEach(p => {
-    html += `<div class="call-play-card">
-      <div class="call-play-num">${p.num}</div>
-      <div style="flex:1;min-width:0;"><div class="call-play-name">${p.type}</div><div class="call-play-var">${p.variation}</div></div>
-      <div class="call-btns">
-        <button class="call-btn call-btn-success" onclick="logCall(${p.num},'SUCCESS')">&#10003;</button>
-        <button class="call-btn call-btn-fail" onclick="logCall(${p.num},'FAIL')">&#10007;</button>
-      </div></div>`;
-  });
+  // Add play button
+  html += `<div class="seq-add-bar">
+    <button class="seq-add-btn" onclick="showAddGamePlay()">+ Add Play to Sequence</button>
+  </div>`;
 
   document.getElementById('gamesContent').innerHTML = html;
 }
 
-function logCall(playNum, result) {
-  const game = games.find(g=>g.id===activeGameId);
+function showAddGamePlay() {
+  // Show modal with play picker
+  let html = '<div class="picker-title"><h3>Add Play to Sequence</h3></div>';
+  html += '<div class="seq-play-picker">';
+  plays.forEach(p => {
+    html += `<div class="seq-pick-item" onclick="addGamePlay(${p.num})">
+      <div class="seq-pick-num">${p.num}</div>
+      <div class="seq-pick-name">${p.type}</div></div>`;
+  });
+  html += '</div>';
+  document.getElementById('modalBox').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('active');
+}
+
+function addGamePlay(playNum) {
+  const game = games.find(g => g.id === activeGameId);
   if (!game) return;
-  game.calls.push({ playNum, result, time: new Date().toLocaleTimeString() });
-  saveGames(); renderActiveGame();
+  const play = plays.find(p => p.num === playNum);
+  if (!play) return;
+  game.calls.push({
+    playNum: playNum,
+    playType: play.type,
+    result: '',
+    C: play.C || '', Q: play.Q || '', W: play.W || '',
+    X: play.X || '', Y: play.Y || '', Z: play.Z || '',
+    time: new Date().toLocaleTimeString()
+  });
+  saveGames();
+  document.getElementById('modalOverlay').classList.remove('active');
+  renderActiveGame();
+}
+
+function markGameCall(idx, result) {
+  const game = games.find(g => g.id === activeGameId);
+  if (!game || !game.calls[idx]) return;
+  // Toggle: if already this result, clear it
+  game.calls[idx].result = game.calls[idx].result === result ? '' : result;
+  saveGames();
+  renderActiveGame();
+}
+
+function moveGameCall(idx, dir) {
+  const game = games.find(g => g.id === activeGameId);
+  if (!game) return;
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= game.calls.length) return;
+  const temp = game.calls[idx];
+  game.calls[idx] = game.calls[newIdx];
+  game.calls[newIdx] = temp;
+  saveGames();
+  renderActiveGame();
+}
+
+function removeGameCall(idx) {
+  const game = games.find(g => g.id === activeGameId);
+  if (!game) return;
+  game.calls.splice(idx, 1);
+  saveGames();
+  renderActiveGame();
+}
+
+function showGamePlayDetail(idx) {
+  const game = games.find(g => g.id === activeGameId);
+  if (!game || !game.calls[idx]) return;
+  const call = game.calls[idx];
+  const play = plays.find(p => p.type === call.playType) || plays.find(p => p.num === call.playNum);
+  const name = call.playType || (play ? play.type : 'Play');
+
+  let html = `<div class="seq-detail-back">
+    <button class="nav-btn" onclick="renderActiveGame()" style="font-size:12px;">&#9664; Back to Sequence</button>
+    <div style="flex:1;text-align:center;font-weight:700;font-size:15px;">#${idx+1} ${name}</div>
+  </div>`;
+
+  // Diagram
+  const diagramKey = call.playType || (play ? play.type : null);
+  if (diagramKey && diagrams[diagramKey]) {
+    const img = diagrams[diagramKey];
+    const mime = img.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
+    html += `<div class="seq-diagram-section">
+      <img src="data:${mime};base64,${img}" alt="${name}">
+    </div>`;
+  }
+
+  // Player assignment grid
+  html += '<div style="padding:4px 16px 8px;"><h3 style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;">Player Assignments</h3></div>';
+  html += '<div class="seq-detail-grid">';
+  ['C','Q','W','X','Y','Z'].forEach(pos => {
+    const pc = posColors[pos];
+    const playerName = call[pos] || '-';
+    html += `<div class="seq-pos-cell" style="border-color:${pc ? pc.color : 'var(--border)'}" onclick="showGamePlayerPicker(${idx},'${pos}')">
+      <div class="seq-pos-label" style="color:${pc ? pc.color : 'var(--accent)'}">${posDot(pos)} ${pos}</div>
+      <div class="seq-pos-player">${playerName}</div>
+    </div>`;
+  });
+  html += '</div>';
+
+  // Result buttons
+  html += `<div style="padding:12px 16px;display:flex;gap:8px;">
+    <button class="call-btn call-btn-success" style="flex:1;padding:12px;font-size:14px;border-radius:10px;${call.result==='SUCCESS'?'opacity:1;box-shadow:0 0 0 2px var(--green);':'opacity:0.6;'}" onclick="markGameCall(${idx},'SUCCESS');showGamePlayDetail(${idx});">&#10003; Success</button>
+    <button class="call-btn call-btn-fail" style="flex:1;padding:12px;font-size:14px;border-radius:10px;${call.result==='FAIL'?'opacity:1;box-shadow:0 0 0 2px var(--red);':'opacity:0.6;'}" onclick="markGameCall(${idx},'FAIL');showGamePlayDetail(${idx});">&#10007; Fail</button>
+  </div>`;
+
+  document.getElementById('gamesContent').innerHTML = html;
+}
+
+function showGamePlayerPicker(callIdx, pos) {
+  const game = games.find(g => g.id === activeGameId);
+  if (!game || !game.calls[callIdx]) return;
+  const call = game.calls[callIdx];
+  const pc = posColors[pos];
+  const color = pc ? pc.color : 'var(--accent)';
+  const eligible = roster.filter(p => {
+    const poss = p.positions ? p.positions.split(',').map(x => x.trim()) : [];
+    return poss.includes(pos);
+  });
+  const currentPlayer = call[pos] || '';
+  const otherPositions = ['C','Q','W','X','Y','Z'].filter(p => p !== pos);
+
+  let html = `<div class="picker-title">
+    <span class="picker-pos-dot" style="background:${color}"></span>
+    <h3>${pos} — Select Player</h3></div>`;
+  if (eligible.length === 0) {
+    html += '<p style="color:var(--text2);font-size:14px;">No eligible players for this position.</p>';
+  } else {
+    html += '<ul class="picker-list">';
+    eligible.forEach(p => {
+      const lastName = p.name.split(' ').pop();
+      const isCurrent = currentPlayer === lastName;
+      const takenByPos = otherPositions.find(op => call[op] === lastName);
+      if (takenByPos && !isCurrent) {
+        html += `<li style="opacity:0.4;cursor:default;pointer-events:none;">
+          <span>${lastName} <span style="font-size:12px;color:var(--text2);">(at ${takenByPos})</span></span>
+          <span class="picker-num">${p.number ? '#' + p.number : ''}</span></li>`;
+      } else {
+        html += `<li class="${isCurrent ? 'picker-current' : ''}" onclick="assignGamePlayer(${callIdx},'${pos}','${lastName}')">
+          <span>${lastName}</span>
+          <span class="picker-num">${p.number ? '#' + p.number : ''}</span></li>`;
+      }
+    });
+    html += '</ul>';
+    if (currentPlayer) {
+      html += `<div class="picker-clear" onclick="assignGamePlayer(${callIdx},'${pos}','')">Clear Assignment</div>`;
+    }
+  }
+  document.getElementById('modalBox').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('active');
+}
+
+function assignGamePlayer(callIdx, pos, playerName) {
+  const game = games.find(g => g.id === activeGameId);
+  if (!game || !game.calls[callIdx]) return;
+  game.calls[callIdx][pos] = playerName;
+  saveGames();
+  document.getElementById('modalOverlay').classList.remove('active');
+  showGamePlayDetail(callIdx);
 }
 
 function endGame() { activeGameId = null; renderGames(); }
