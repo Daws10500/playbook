@@ -74,13 +74,19 @@
     cursor:pointer; transition:all .15s; white-space:nowrap;
   }
   .nav-btn.active { background:var(--accent); border-color:var(--accent); color:#fff; }
-  .theme-toggle {
+  .theme-toggle, .sync-btn {
     width:36px; height:36px; border-radius:8px;
     border:1px solid var(--border); background:var(--surface);
     cursor:pointer; display:flex; align-items:center; justify-content:center;
     font-size:16px; transition:all .15s; flex-shrink:0;
   }
-  .theme-toggle:active { transform:scale(0.92); }
+  .theme-toggle:active, .sync-btn:active { transform:scale(0.92); }
+  .sync-btn { font-size:18px; color:var(--text2); position:relative; }
+  .sync-btn.synced { color:var(--green); }
+  .sync-btn.syncing { color:var(--accent); animation:spin 1s linear infinite; }
+  .sync-btn.error { color:var(--red); }
+  .sync-btn.offline { color:var(--text2); opacity:0.4; }
+  @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
 
   /* ========= VIEWS ========= */
   .view { display:none; }
@@ -619,6 +625,65 @@
     width:100%; max-width:360px; box-shadow:0 8px 32px rgba(0,0,0,0.3);
   }
   .modal-box h3 { font-size:18px; font-weight:700; margin-bottom:16px; }
+
+  /* ========= DIAGRAM EDITOR ========= */
+  .diagram-editor-overlay {
+    display:none; position:fixed; inset:0; z-index:300;
+    background:var(--bg); flex-direction:column;
+  }
+  .diagram-editor-overlay.active { display:flex; }
+  .de-toolbar {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px 12px; background:var(--surface);
+    border-bottom:1px solid var(--border); flex-shrink:0;
+  }
+  .de-title { font-size:16px; font-weight:700; }
+  .de-btn {
+    padding:8px 14px; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface); color:var(--text); font-size:13px; font-weight:600;
+    cursor:pointer; transition:all .15s;
+  }
+  .de-btn:active { transform:scale(0.95); }
+  .de-done { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .de-cancel { color:var(--red); border-color:var(--red); }
+  .de-actions {
+    display:flex; align-items:center; gap:6px;
+    padding:8px 12px; background:var(--surface);
+    border-bottom:1px solid var(--border); flex-shrink:0; flex-wrap:wrap;
+  }
+  .de-select {
+    flex:1; min-width:100px; padding:7px 8px; border-radius:8px;
+    border:1px solid var(--border); background:var(--surface2);
+    color:var(--text); font-size:12px; font-weight:600;
+  }
+  .de-undo, .de-clear { flex-shrink:0; padding:8px 10px; font-size:14px; }
+  .de-canvas-wrap {
+    flex:1; overflow:hidden; background:#2d5a27; position:relative;
+  }
+  .de-hint {
+    padding:8px 12px; background:var(--surface); text-align:center;
+    font-size:12px; color:var(--text2); border-top:1px solid var(--border); flex-shrink:0;
+  }
+  .diagram-options {
+    display:flex; gap:8px; margin-bottom:8px;
+  }
+  .diagram-opt-btn {
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:4px;
+    padding:16px 10px; border-radius:var(--radius); border:2px dashed var(--border);
+    background:var(--surface2); color:var(--text2); cursor:pointer;
+    transition:all .15s; font-size:12px; font-weight:600;
+  }
+  .diagram-opt-btn:active { transform:scale(0.97); }
+  .diagram-opt-btn .opt-icon { font-size:28px; }
+  .diagram-edit-overlay {
+    position:absolute; bottom:8px; right:8px;
+  }
+  .diagram-edit-btn {
+    padding:6px 12px; border-radius:8px; border:none;
+    background:rgba(0,0,0,0.7); color:#fff; font-size:12px; font-weight:600;
+    cursor:pointer; backdrop-filter:blur(4px);
+  }
+  .diagram-edit-btn:active { transform:scale(0.95); }
 </style>
 </head>
 <body>
@@ -634,6 +699,7 @@
       <button class="nav-btn" onclick="showView('addplay')">+ Add</button>
     </div>
     <button class="theme-toggle" onclick="toggleTheme()" id="themeBtn" title="Toggle light/dark mode">&#127769;</button>
+    <button class="sync-btn offline" onclick="fullSync()" id="syncBtn" title="Cloud sync">&#9729;</button>
   </div>
 </div>
 
@@ -688,10 +754,148 @@
   <div class="modal-box" id="modalBox"></div>
 </div>
 
+<!-- Diagram Editor Overlay -->
+<div class="diagram-editor-overlay" id="diagramEditorOverlay">
+  <div class="de-toolbar">
+    <button class="de-btn de-cancel" onclick="closeDiagramEditor(false)">Cancel</button>
+    <span class="de-title">Draw Play</span>
+    <button class="de-btn de-done" onclick="closeDiagramEditor(true)">Done</button>
+  </div>
+  <div class="de-actions">
+    <select class="de-select" id="deFormation" onchange="applyFormation(this.value)">
+      <option value="">Formation...</option>
+      <option value="Spread">Spread</option>
+      <option value="Trips Right">Trips Right</option>
+      <option value="Trips Left">Trips Left</option>
+      <option value="Bunch Right">Bunch Right</option>
+      <option value="Bunch Left">Bunch Left</option>
+      <option value="Twins">Twins</option>
+      <option value="Deuce">Deuce</option>
+    </select>
+    <select class="de-select" id="deRoute" onchange="selectRoutePreset(this.value)">
+      <option value="">Route...</option>
+      <option value="Slant">Slant</option>
+      <option value="Out">Out</option>
+      <option value="In">In</option>
+      <option value="Go">Go / Fly</option>
+      <option value="Post">Post</option>
+      <option value="Corner">Corner</option>
+      <option value="Curl">Curl</option>
+      <option value="Drag">Drag</option>
+      <option value="Wheel">Wheel</option>
+      <option value="Flat">Flat</option>
+      <option value="Screen">Screen</option>
+      <option value="Block">Block</option>
+    </select>
+    <button class="de-btn de-undo" onclick="diagramUndo()" title="Undo">&#8630;</button>
+    <button class="de-btn de-clear" onclick="diagramClear()" title="Clear routes">Clear</button>
+  </div>
+  <div class="de-canvas-wrap" id="deCanvasWrap">
+    <div id="diagramEditorCanvas" style="touch-action:none;"></div>
+  </div>
+  <div class="de-hint" id="deHint">Drag players to position. Tap a player to select, then pick a route.</div>
+</div>
+
 <!-- Hidden file input for photo upload -->
 <input type="file" id="photoFileInput" accept="image/*" style="display:none" onchange="handlePhotoSelect(event)">
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://unpkg.com/konva@10.0.0-1/konva.min.js"></script>
 <script>
+// ============= SUPABASE SYNC =============
+const SUPABASE_URL = 'https://rqdpvwevjecwtadoulno.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJxZHB2d2V2amVjd3RhZG91bG5vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg5OTU5ODIsImV4cCI6MjA2NDU3MTk4Mn0.xSFOEi0XIJrSPA-gIzrOtNbInBMDrJ8lCh7AH3yg414';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+function updateSyncIndicator(status) {
+  const btn = document.getElementById('syncBtn');
+  if (!btn) return;
+  btn.className = 'sync-btn ' + status;
+  btn.title = status === 'synced' ? 'Synced' : status === 'syncing' ? 'Syncing...' : status === 'error' ? 'Sync error – tap to retry' : 'Offline';
+}
+
+async function pushToSupabase(key, value) {
+  if (!navigator.onLine) return;
+  try {
+    const ts = new Date().toISOString();
+    await sb.from('playbook_kv').upsert({ key, value, updated_at: ts }, { onConflict: 'key' });
+  } catch(e) { console.warn('Supabase push failed:', key, e); }
+}
+
+async function pullFromSupabase() {
+  const { data, error } = await sb.from('playbook_kv').select('*');
+  if (error) throw error;
+  return data || [];
+}
+
+async function fullSync() {
+  if (!navigator.onLine) { updateSyncIndicator('offline'); return; }
+  updateSyncIndicator('syncing');
+  try {
+    // Pull remote rows
+    const rows = await pullFromSupabase();
+    const remote = {};
+    rows.forEach(r => { remote[r.key] = r; });
+
+    // Sync metadata from localStorage
+    let syncMeta = {};
+    try { syncMeta = JSON.parse(localStorage.getItem('playbook_sync_meta') || '{}'); } catch(e) {}
+
+    const keyMap = {
+      plays:    { get: () => localStorage.getItem('playbook_plays'),    set: v => { plays = JSON.parse(v); localStorage.setItem('playbook_plays', v); } },
+      games:    { get: () => localStorage.getItem('playbook_games'),    set: v => { games = JSON.parse(v); localStorage.setItem('playbook_games', v); } },
+      roster:   { get: () => localStorage.getItem('playbook_roster'),   set: v => { roster = JSON.parse(v); localStorage.setItem('playbook_roster', v); } },
+      gamelogs: { get: () => localStorage.getItem('playbook_gamelogs'), set: v => { gameLogs = JSON.parse(v); localStorage.setItem('playbook_gamelogs', v); } },
+      theme:    { get: () => localStorage.getItem('playbook_theme'),    set: v => { localStorage.setItem('playbook_theme', v); document.documentElement.setAttribute('data-theme', v); document.getElementById('themeBtn').innerHTML = v === 'light' ? '&#9728;&#65039;' : '&#127769;'; } }
+    };
+
+    let changed = false;
+    for (const [key, fns] of Object.entries(keyMap)) {
+      const localVal = fns.get();
+      const localTs = syncMeta[key] || '1970-01-01T00:00:00Z';
+      const remoteRow = remote[key];
+
+      if (remoteRow && new Date(remoteRow.updated_at) > new Date(localTs)) {
+        // Remote is newer — pull it
+        const val = typeof remoteRow.value === 'string' ? remoteRow.value : JSON.stringify(remoteRow.value);
+        fns.set(val);
+        syncMeta[key] = remoteRow.updated_at;
+        changed = true;
+      } else if (localVal != null) {
+        // Local is newer or remote missing — push it
+        const parsed = (() => { try { return JSON.parse(localVal); } catch(e) { return localVal; } })();
+        await pushToSupabase(key, parsed);
+        syncMeta[key] = new Date().toISOString();
+      }
+    }
+    localStorage.setItem('playbook_sync_meta', JSON.stringify(syncMeta));
+    if (changed) { renderPlayList(); renderRoster(); }
+    updateSyncIndicator('synced');
+  } catch(e) {
+    console.error('Sync failed:', e);
+    updateSyncIndicator('error');
+  }
+}
+
+async function initialMigration() {
+  if (localStorage.getItem('playbook_sync_init')) return;
+  if (!navigator.onLine) return;
+  try {
+    const keyMap = { plays: 'playbook_plays', games: 'playbook_games', roster: 'playbook_roster', gamelogs: 'playbook_gamelogs', theme: 'playbook_theme' };
+    const syncMeta = {};
+    for (const [sbKey, lsKey] of Object.entries(keyMap)) {
+      const raw = localStorage.getItem(lsKey);
+      if (raw != null) {
+        const parsed = (() => { try { return JSON.parse(raw); } catch(e) { return raw; } })();
+        await pushToSupabase(sbKey, parsed);
+        syncMeta[sbKey] = new Date().toISOString();
+      }
+    }
+    localStorage.setItem('playbook_sync_meta', JSON.stringify(syncMeta));
+    localStorage.setItem('playbook_sync_init', '1');
+  } catch(e) { console.warn('Initial migration failed:', e); }
+}
+
 // ============= DATA =============
 let plays = [
   {
@@ -1021,6 +1225,7 @@ function posTag(pos) {
 let activeFilter = "All";
 let editingPlay = null;
 let pendingPhoto = null; // base64 photo for add/edit form
+let pendingDiagramData = null; // Konva JSON for re-editing diagrams
 let games = [];
 let activeGameId = null;
 
@@ -1031,6 +1236,8 @@ function toggleTheme() {
   root.setAttribute('data-theme', next);
   document.getElementById('themeBtn').innerHTML = next === 'light' ? '&#9728;&#65039;' : '&#127769;';
   try { localStorage.setItem('playbook_theme', next); } catch(e) {}
+  const meta = JSON.parse(localStorage.getItem('playbook_sync_meta') || '{}'); meta.theme = new Date().toISOString(); localStorage.setItem('playbook_sync_meta', JSON.stringify(meta));
+  pushToSupabase('theme', next);
 }
 function loadTheme() {
   try {
@@ -1043,7 +1250,11 @@ function loadTheme() {
 }
 
 // ============= PERSISTENCE =============
-function savePlays() { try { localStorage.setItem('playbook_plays', JSON.stringify(plays)); } catch(e) { alert('Storage full! Try removing some custom diagrams.'); } }
+function savePlays() {
+  try { localStorage.setItem('playbook_plays', JSON.stringify(plays)); } catch(e) { alert('Storage full! Try removing some custom diagrams.'); }
+  const meta = JSON.parse(localStorage.getItem('playbook_sync_meta') || '{}'); meta.plays = new Date().toISOString(); localStorage.setItem('playbook_sync_meta', JSON.stringify(meta));
+  pushToSupabase('plays', plays);
+}
 const PLAYBOOK_VERSION = 'v8-gamesequence';
 function loadPlays() {
   try {
@@ -1058,9 +1269,17 @@ function loadPlays() {
     if (s) plays = JSON.parse(s);
   } catch(e) {}
 }
-function saveGames() { try { localStorage.setItem('playbook_games', JSON.stringify(games)); } catch(e) {} }
+function saveGames() {
+  try { localStorage.setItem('playbook_games', JSON.stringify(games)); } catch(e) {}
+  const meta = JSON.parse(localStorage.getItem('playbook_sync_meta') || '{}'); meta.games = new Date().toISOString(); localStorage.setItem('playbook_sync_meta', JSON.stringify(meta));
+  pushToSupabase('games', games);
+}
 function loadGames() { try { const s = localStorage.getItem('playbook_games'); if (s) games = JSON.parse(s); } catch(e) {} }
-function saveRoster() { try { localStorage.setItem('playbook_roster', JSON.stringify(roster)); } catch(e) {} }
+function saveRoster() {
+  try { localStorage.setItem('playbook_roster', JSON.stringify(roster)); } catch(e) {}
+  const meta = JSON.parse(localStorage.getItem('playbook_sync_meta') || '{}'); meta.roster = new Date().toISOString(); localStorage.setItem('playbook_sync_meta', JSON.stringify(meta));
+  pushToSupabase('roster', roster);
+}
 function loadRoster() { try { const s = localStorage.getItem('playbook_roster'); if (s) roster = JSON.parse(s); } catch(e) {} }
 
 // ============= IMAGE COMPRESSION =============
@@ -1341,8 +1560,9 @@ function showPlay(num) {
   if (customImg) {
     const isJpeg = !customImg.startsWith('iVBOR');
     const mime = isJpeg ? 'image/jpeg' : 'image/png';
+    const editDiagBtn = play.diagramData ? `<div style="text-align:center;margin-top:8px;"><button class="diagram-edit-btn" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;" onclick="editPlay(${play.num});setTimeout(()=>openDiagramEditor(plays.find(p=>p.num===${play.num}).diagramData),100)">Edit Diagram</button></div>` : '';
     diag.innerHTML = `<div class="diagram-label">${play.type} <span class="diagram-badge custom">Custom</span></div>
-      <img class="diagram-img" src="data:${mime};base64,${customImg}" alt="${play.type} diagram">`;
+      <img class="diagram-img" src="data:${mime};base64,${customImg}" alt="${play.type} diagram">${editDiagBtn}`;
   } else if (builtinImg) {
     const builtinMime = builtinImg.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
     diag.innerHTML = `<div class="diagram-label">${play.type} <span class="diagram-badge builtin">Formation</span></div>
@@ -1483,7 +1703,11 @@ let gameLogs = {};
 let activeStatsTab = 'log';
 let expandedLogPlay = null;
 
-function saveGameLogs() { try { localStorage.setItem('playbook_gamelogs', JSON.stringify(gameLogs)); } catch(e) {} }
+function saveGameLogs() {
+  try { localStorage.setItem('playbook_gamelogs', JSON.stringify(gameLogs)); } catch(e) {}
+  const meta = JSON.parse(localStorage.getItem('playbook_sync_meta') || '{}'); meta.gamelogs = new Date().toISOString(); localStorage.setItem('playbook_sync_meta', JSON.stringify(meta));
+  pushToSupabase('gamelogs', gameLogs);
+}
 function loadGameLogs() { try { const s = localStorage.getItem('playbook_gamelogs'); if (s) gameLogs = JSON.parse(s); } catch(e) {} }
 
 function getActiveGameLog() {
@@ -1779,6 +2003,7 @@ function triggerPhotoUpload() {
 }
 function removePhoto() {
   pendingPhoto = null;
+  pendingDiagramData = null;
   renderPhotoPreview();
 }
 function renderPhotoPreview() {
@@ -1787,13 +2012,19 @@ function renderPhotoPreview() {
   if (pendingPhoto) {
     const isJpeg = !pendingPhoto.startsWith('iVBOR');
     const mime = isJpeg ? 'image/jpeg' : 'image/png';
-    el.innerHTML = `<div class="photo-preview">
+    const editBtn = pendingDiagramData ? `<div class="diagram-edit-overlay"><button class="diagram-edit-btn" onclick="openDiagramEditor(pendingDiagramData)">Edit Diagram</button></div>` : '';
+    el.innerHTML = `<div class="photo-preview" style="position:relative;">
       <img src="data:${mime};base64,${pendingPhoto}" alt="Play diagram">
+      ${editBtn}
       <button class="photo-remove" onclick="removePhoto()">&times;</button></div>`;
   } else {
-    el.innerHTML = `<div class="photo-upload-area" onclick="triggerPhotoUpload()">
-      <div class="upload-icon">&#128247;</div>
-      <div class="upload-text">Tap to add a play diagram photo</div></div>`;
+    el.innerHTML = `<div class="diagram-options">
+      <div class="diagram-opt-btn" onclick="triggerPhotoUpload()">
+        <div class="opt-icon">&#128247;</div>
+        <div>Upload Photo</div></div>
+      <div class="diagram-opt-btn" onclick="openDiagramEditor(null)">
+        <div class="opt-icon">&#9998;</div>
+        <div>Draw Diagram</div></div></div>`;
   }
 }
 
@@ -1801,6 +2032,7 @@ function renderAddForm(play) {
   editingPlay = play || null;
   const isEdit = !!play;
   pendingPhoto = isEdit ? (play.customDiagram || null) : null;
+  pendingDiagramData = isEdit ? (play.diagramData || null) : null;
   const form = document.getElementById('addPlayForm');
   const typeOptions = playTypes.map(t => '<option value="'+t+'"'+(isEdit&&play.type===t?' selected':'')+'>'+t+'</option>').join('');
   const posGridHtml = ['C','Q','W','X','Y','Z'].map(pos => {
@@ -1848,6 +2080,7 @@ function savePlay() {
     target: document.getElementById('f-target').value,
     action: document.getElementById('f-action').value,
     customDiagram: pendingPhoto || null,
+    diagramData: pendingDiagramData || null,
   };
   if (editingPlay) {
     const idx = plays.findIndex(p => p.num === editingPlay.num);
@@ -1879,6 +2112,487 @@ function deletePlay(num) {
   plays = plays.filter(p=>p.num!==num);
   plays.forEach((p,i)=>p.num=i+1);
   savePlays(); showView('gameplan');
+}
+
+// ============= DIAGRAM EDITOR =============
+const FORMATIONS = {
+  'Spread': { C:{x:400,y:480}, Q:{x:400,y:560}, W:{x:80,y:440}, X:{x:720,y:440}, Y:{x:240,y:440}, Z:{x:560,y:440} },
+  'Trips Right': { C:{x:400,y:480}, Q:{x:400,y:560}, W:{x:80,y:440}, X:{x:520,y:440}, Y:{x:600,y:440}, Z:{x:680,y:440} },
+  'Trips Left': { C:{x:400,y:480}, Q:{x:400,y:560}, W:{x:720,y:440}, X:{x:280,y:440}, Y:{x:200,y:440}, Z:{x:120,y:440} },
+  'Bunch Right': { C:{x:400,y:480}, Q:{x:400,y:560}, W:{x:100,y:440}, X:{x:600,y:440}, Y:{x:620,y:400}, Z:{x:640,y:440} },
+  'Bunch Left': { C:{x:400,y:480}, Q:{x:400,y:560}, W:{x:700,y:440}, X:{x:200,y:440}, Y:{x:180,y:400}, Z:{x:160,y:440} },
+  'Twins': { C:{x:400,y:480}, Q:{x:400,y:560}, W:{x:100,y:440}, X:{x:600,y:440}, Y:{x:200,y:440}, Z:{x:700,y:440} },
+  'Deuce': { C:{x:400,y:480}, Q:{x:400,y:560}, W:{x:120,y:440}, X:{x:680,y:440}, Y:{x:320,y:500}, Z:{x:480,y:500} },
+};
+
+const ROUTE_PRESETS = {
+  'Slant': { points:[{dx:0,dy:-40},{dx:80,dy:-200}], type:'solid' },
+  'Out': { points:[{dx:0,dy:-120},{dx:120,dy:-120}], type:'solid' },
+  'In': { points:[{dx:0,dy:-120},{dx:-120,dy:-120}], type:'solid' },
+  'Go': { points:[{dx:0,dy:-300}], type:'solid' },
+  'Post': { points:[{dx:0,dy:-160},{dx:-70,dy:-300}], type:'solid' },
+  'Corner': { points:[{dx:0,dy:-160},{dx:100,dy:-300}], type:'solid' },
+  'Curl': { points:[{dx:0,dy:-180},{dx:0,dy:-150}], type:'solid' },
+  'Drag': { points:[{dx:0,dy:-30},{dx:200,dy:-30}], type:'solid' },
+  'Wheel': { points:[{dx:-50,dy:-30},{dx:-50,dy:-280}], type:'solid' },
+  'Flat': { points:[{dx:100,dy:20}], type:'solid' },
+  'Screen': { points:[{dx:30,dy:40},{dx:80,dy:20}], type:'dashed' },
+  'Block': { points:[{dx:0,dy:-40}], type:'block' },
+};
+
+let deStage = null;
+let deLayerBg = null;
+let deLayerPlayers = null;
+let deLayerRoutes = null;
+let dePlayerNodes = {};  // pos -> {group, circle/rect, label, ring}
+let deRoutes = {};       // pos -> {arrow, points, type, label}
+let deSelectedPos = null;
+let deUndoStack = [];
+const DE_POSITIONS = ['C','Q','W','X','Y','Z'];
+
+function openDiagramEditor(existingData) {
+  const overlay = document.getElementById('diagramEditorOverlay');
+  overlay.classList.add('active');
+  document.body.style.overflow = 'hidden';
+
+  const wrap = document.getElementById('deCanvasWrap');
+  const w = wrap.clientWidth;
+  const h = wrap.clientHeight;
+
+  deStage = new Konva.Stage({
+    container: 'diagramEditorCanvas',
+    width: w, height: h
+  });
+
+  deLayerBg = new Konva.Layer();
+  deLayerRoutes = new Konva.Layer();
+  deLayerPlayers = new Konva.Layer();
+  deStage.add(deLayerBg);
+  deStage.add(deLayerRoutes);
+  deStage.add(deLayerPlayers);
+
+  drawField(w, h);
+
+  dePlayerNodes = {};
+  deRoutes = {};
+  deSelectedPos = null;
+  deUndoStack = [];
+
+  if (existingData) {
+    restoreDiagramState(existingData, w, h);
+  } else {
+    applyFormation('Spread');
+  }
+  document.getElementById('deFormation').value = existingData ? '' : 'Spread';
+  document.getElementById('deRoute').value = '';
+
+  deStage.on('tap click', function(e) { handleStageTap(e); });
+  updateHint('Drag players to position. Tap a player to select, then pick a route.');
+}
+
+function drawField(w, h) {
+  deLayerBg.destroyChildren();
+  // Field background
+  deLayerBg.add(new Konva.Rect({ x:0, y:0, width:w, height:h, fill:'#2d5a27' }));
+  // Yard lines
+  const lineCount = 9;
+  for (let i = 1; i < lineCount; i++) {
+    const ly = (h / lineCount) * i;
+    deLayerBg.add(new Konva.Line({
+      points:[20, ly, w-20, ly],
+      stroke:'rgba(255,255,255,0.15)', strokeWidth:1, dash:[8,8]
+    }));
+  }
+  // Line of scrimmage
+  const losY = h * 0.58;
+  deLayerBg.add(new Konva.Line({
+    points:[0, losY, w, losY],
+    stroke:'rgba(255,215,0,0.5)', strokeWidth:2
+  }));
+  deLayerBg.add(new Konva.Text({
+    x:w-60, y:losY-18, text:'L.O.S.', fill:'rgba(255,215,0,0.5)',
+    fontSize:11, fontStyle:'bold'
+  }));
+  deLayerBg.draw();
+}
+
+function createPlayerNode(pos, x, y) {
+  const pc = posColors[pos];
+  const color = pc ? pc.color : '#888';
+  const radius = 22;
+  const group = new Konva.Group({ x:x, y:y, draggable:true });
+
+  // Selection ring (hidden by default)
+  const ring = new Konva.Circle({
+    x:0, y:0, radius:radius+6,
+    stroke:'#FFD700', strokeWidth:3, visible:false
+  });
+  group.add(ring);
+
+  // Player shape
+  let shape;
+  if (pos === 'C') {
+    shape = new Konva.Rect({
+      x:-radius, y:-radius, width:radius*2, height:radius*2,
+      fill:color, cornerRadius:4, stroke:'#fff', strokeWidth:2
+    });
+  } else {
+    shape = new Konva.Circle({
+      x:0, y:0, radius:radius,
+      fill:color, stroke:'#fff', strokeWidth:2
+    });
+  }
+  group.add(shape);
+
+  // Position label
+  const label = new Konva.Text({
+    x:-radius, y:-8, width:radius*2,
+    text:pos, fill:'#fff', fontSize:16, fontStyle:'bold', align:'center'
+  });
+  group.add(label);
+
+  // Tap to select
+  group.on('tap click', function(e) {
+    e.cancelBubble = true;
+    selectPlayerForRoute(pos);
+  });
+
+  // Drag to reposition
+  group.on('dragstart', function() { pushUndoState(); });
+  group.on('dragmove', function() { updateRouteForPlayer(pos); });
+  group.on('dragend', function() { updateRouteForPlayer(pos); });
+
+  deLayerPlayers.add(group);
+  dePlayerNodes[pos] = { group, shape, label, ring };
+}
+
+function applyFormation(name) {
+  if (!name || !FORMATIONS[name]) return;
+  const f = FORMATIONS[name];
+  const wrap = document.getElementById('deCanvasWrap');
+  const w = wrap.clientWidth;
+  const h = wrap.clientHeight;
+  const sx = w / 800;
+  const sy = h / 800;
+
+  pushUndoState();
+
+  // Remove existing player nodes
+  deLayerPlayers.destroyChildren();
+  dePlayerNodes = {};
+  // Clear routes too when changing formation
+  deLayerRoutes.destroyChildren();
+  deRoutes = {};
+  deSelectedPos = null;
+
+  DE_POSITIONS.forEach(pos => {
+    const fx = f[pos].x * sx;
+    const fy = f[pos].y * sy;
+    createPlayerNode(pos, fx, fy);
+  });
+  deLayerPlayers.draw();
+  deLayerRoutes.draw();
+  updateHint('Tap a player to select, then pick a route from the dropdown.');
+}
+
+function selectPlayerForRoute(pos) {
+  // Deselect previous
+  if (deSelectedPos && dePlayerNodes[deSelectedPos]) {
+    dePlayerNodes[deSelectedPos].ring.visible(false);
+  }
+  deTapWaypoints = [];
+  if (deSelectedPos === pos) {
+    deSelectedPos = null;
+    deLayerPlayers.draw();
+    updateHint('Tap a player to select, then pick a route.');
+    return;
+  }
+  deSelectedPos = pos;
+  if (dePlayerNodes[pos]) {
+    dePlayerNodes[pos].ring.visible(true);
+  }
+  deLayerPlayers.draw();
+  document.getElementById('deRoute').value = '';
+  updateHint(`${pos} selected. Pick a route from dropdown or tap the field for custom waypoints.`);
+}
+
+function selectRoutePreset(name) {
+  if (!name || !ROUTE_PRESETS[name]) return;
+  if (!deSelectedPos) {
+    updateHint('Select a player first, then pick a route.');
+    document.getElementById('deRoute').value = '';
+    return;
+  }
+  const pos = deSelectedPos;
+  const node = dePlayerNodes[pos];
+  if (!node) return;
+
+  pushUndoState();
+
+  const preset = ROUTE_PRESETS[name];
+  const px = node.group.x();
+  const py = node.group.y();
+
+  // Determine if player is on right side of field — mirror routes
+  const wrap = document.getElementById('deCanvasWrap');
+  const midX = wrap.clientWidth / 2;
+  const isRight = px > midX + 30;
+  const mirror = isRight ? -1 : 1;
+
+  const routePoints = [0, 0]; // start at player
+  preset.points.forEach(pt => {
+    routePoints.push(pt.dx * mirror);
+    routePoints.push(pt.dy);
+  });
+
+  // Remove existing route for this player
+  if (deRoutes[pos]) {
+    if (deRoutes[pos].arrow._blockBar) deRoutes[pos].arrow._blockBar.destroy();
+    deRoutes[pos].arrow.destroy();
+  }
+
+  drawRouteArrow(pos, routePoints, preset.type);
+  deLayerRoutes.draw();
+  document.getElementById('deRoute').value = '';
+  updateHint(`${name} route drawn for ${pos}. Select another player or tap Done.`);
+}
+
+let deTapWaypoints = []; // for custom route drawing
+
+function handleStageTap(e) {
+  if (!deSelectedPos) return;
+  // Only process taps on the background (not on players)
+  if (e.target !== deStage && e.target.getParent() !== deLayerBg && e.target.getLayer() !== deLayerBg) return;
+
+  const pos = deSelectedPos;
+  const node = dePlayerNodes[pos];
+  if (!node) return;
+
+  const pointer = deStage.getPointerPosition();
+  if (!pointer) return;
+
+  const px = node.group.x();
+  const py = node.group.y();
+
+  if (deTapWaypoints.length === 0) {
+    pushUndoState();
+  }
+
+  deTapWaypoints.push(pointer.x - px, pointer.y - py);
+
+  // Remove old route and redraw with new waypoints
+  if (deRoutes[pos]) {
+    if (deRoutes[pos].arrow._blockBar) deRoutes[pos].arrow._blockBar.destroy();
+    deRoutes[pos].arrow.destroy();
+  }
+  const routePoints = [0, 0, ...deTapWaypoints];
+  drawRouteArrow(pos, routePoints, 'solid');
+  deLayerRoutes.draw();
+  updateHint(`Tap field to add more waypoints, or select another player / pick a preset.`);
+}
+
+function drawRouteArrow(pos, points, type) {
+  const node = dePlayerNodes[pos];
+  if (!node) return;
+  const pc = posColors[pos];
+  const color = pc ? pc.color : '#fff';
+  const px = node.group.x();
+  const py = node.group.y();
+
+  // Convert relative points to absolute
+  const absPoints = [];
+  for (let i = 0; i < points.length; i += 2) {
+    absPoints.push(px + points[i]);
+    absPoints.push(py + points[i+1]);
+  }
+
+  let arrow;
+  if (type === 'block') {
+    arrow = new Konva.Line({
+      points: absPoints,
+      stroke: color, strokeWidth: 4,
+      lineCap: 'round', lineJoin: 'round'
+    });
+    // Add a small perpendicular line at end for block symbol
+    const endX = absPoints[absPoints.length - 2];
+    const endY = absPoints[absPoints.length - 1];
+    const blockBar = new Konva.Line({
+      points: [endX - 10, endY, endX + 10, endY],
+      stroke: color, strokeWidth: 4, lineCap: 'round'
+    });
+    deLayerRoutes.add(blockBar);
+    // Store reference to block bar for cleanup
+    arrow._blockBar = blockBar;
+  } else {
+    arrow = new Konva.Arrow({
+      points: absPoints,
+      stroke: color, strokeWidth: 3,
+      fill: color, pointerLength: 10, pointerWidth: 8,
+      lineCap: 'round', lineJoin: 'round',
+      dash: type === 'dashed' ? [10, 6] : undefined
+    });
+  }
+
+  deLayerRoutes.add(arrow);
+  deRoutes[pos] = { arrow, points: [...points], type };
+  deTapWaypoints = [];
+}
+
+function updateRouteForPlayer(pos) {
+  if (!deRoutes[pos]) return;
+  const route = deRoutes[pos];
+  const node = dePlayerNodes[pos];
+  if (!node) return;
+
+  const px = node.group.x();
+  const py = node.group.y();
+
+  const absPoints = [];
+  for (let i = 0; i < route.points.length; i += 2) {
+    absPoints.push(px + route.points[i]);
+    absPoints.push(py + route.points[i+1]);
+  }
+  route.arrow.points(absPoints);
+
+  // Update block bar position if exists
+  if (route.arrow._blockBar) {
+    const endX = absPoints[absPoints.length - 2];
+    const endY = absPoints[absPoints.length - 1];
+    route.arrow._blockBar.points([endX - 10, endY, endX + 10, endY]);
+  }
+  deLayerRoutes.draw();
+}
+
+function closeDiagramEditor(save) {
+  if (save && deStage) {
+    // Hide selection rings for export
+    DE_POSITIONS.forEach(pos => {
+      if (dePlayerNodes[pos]) dePlayerNodes[pos].ring.visible(false);
+    });
+    deLayerPlayers.draw();
+
+    // Save editable state
+    const state = buildDiagramState();
+    pendingDiagramData = JSON.stringify(state);
+
+    // Export as image
+    const dataURL = deStage.toDataURL({ pixelRatio: 2, mimeType: 'image/jpeg', quality: 0.85 });
+    // Strip data:image/jpeg;base64, prefix
+    pendingPhoto = dataURL.replace(/^data:image\/\w+;base64,/, '');
+    renderPhotoPreview();
+  }
+
+  // Cleanup
+  if (deStage) { deStage.destroy(); deStage = null; }
+  deLayerBg = null; deLayerPlayers = null; deLayerRoutes = null;
+  dePlayerNodes = {}; deRoutes = {}; deSelectedPos = null;
+  deUndoStack = []; deTapWaypoints = [];
+
+  const overlay = document.getElementById('diagramEditorOverlay');
+  overlay.classList.remove('active');
+  document.body.style.overflow = '';
+}
+
+function buildDiagramState() {
+  const players = {};
+  DE_POSITIONS.forEach(pos => {
+    if (dePlayerNodes[pos]) {
+      players[pos] = {
+        x: dePlayerNodes[pos].group.x(),
+        y: dePlayerNodes[pos].group.y()
+      };
+    }
+  });
+  const routes = {};
+  DE_POSITIONS.forEach(pos => {
+    if (deRoutes[pos]) {
+      routes[pos] = {
+        points: deRoutes[pos].points,
+        type: deRoutes[pos].type
+      };
+    }
+  });
+  const wrap = document.getElementById('deCanvasWrap');
+  return {
+    canvasW: wrap.clientWidth,
+    canvasH: wrap.clientHeight,
+    players, routes
+  };
+}
+
+function pushUndoState() {
+  const state = buildDiagramState();
+  deUndoStack.push(JSON.stringify(state));
+  if (deUndoStack.length > 30) deUndoStack.shift();
+}
+
+function diagramUndo() {
+  if (deUndoStack.length === 0) { updateHint('Nothing to undo.'); return; }
+  const json = deUndoStack.pop();
+  const state = JSON.parse(json);
+  const wrap = document.getElementById('deCanvasWrap');
+  restoreDiagramState(json, wrap.clientWidth, wrap.clientHeight);
+  updateHint('Undone. ' + deUndoStack.length + ' state(s) remaining.');
+}
+
+function diagramClear() {
+  pushUndoState();
+  deLayerRoutes.destroyChildren();
+  deRoutes = {};
+  deSelectedPos = null;
+  DE_POSITIONS.forEach(pos => {
+    if (dePlayerNodes[pos]) dePlayerNodes[pos].ring.visible(false);
+  });
+  deLayerRoutes.draw();
+  deLayerPlayers.draw();
+  deTapWaypoints = [];
+  updateHint('Routes cleared. Players remain in position.');
+}
+
+function restoreDiagramState(json, canvasW, canvasH) {
+  const state = typeof json === 'string' ? JSON.parse(json) : json;
+  const scaleX = canvasW / (state.canvasW || canvasW);
+  const scaleY = canvasH / (state.canvasH || canvasH);
+
+  // Clear existing
+  deLayerPlayers.destroyChildren();
+  deLayerRoutes.destroyChildren();
+  dePlayerNodes = {};
+  deRoutes = {};
+  deSelectedPos = null;
+  deTapWaypoints = [];
+
+  // Recreate players
+  DE_POSITIONS.forEach(pos => {
+    if (state.players && state.players[pos]) {
+      const p = state.players[pos];
+      createPlayerNode(pos, p.x * scaleX, p.y * scaleY);
+    }
+  });
+
+  // Recreate routes
+  if (state.routes) {
+    DE_POSITIONS.forEach(pos => {
+      if (state.routes[pos]) {
+        const r = state.routes[pos];
+        // Scale route points
+        const scaledPoints = [];
+        for (let i = 0; i < r.points.length; i += 2) {
+          scaledPoints.push(r.points[i] * scaleX);
+          scaledPoints.push(r.points[i+1] * scaleY);
+        }
+        drawRouteArrow(pos, scaledPoints, r.type);
+      }
+    });
+  }
+
+  deLayerPlayers.draw();
+  deLayerRoutes.draw();
+}
+
+function updateHint(text) {
+  const el = document.getElementById('deHint');
+  if (el) el.textContent = text;
 }
 
 // ============= GAME DAY TRACKER =============
@@ -2223,6 +2937,12 @@ loadPlays();
 loadGames();
 loadGameLogs();
 renderPlayList();
+
+// Cloud sync (non-blocking)
+initialMigration().then(() => fullSync()).catch(e => console.warn('Sync init error:', e));
+window.addEventListener('online', () => { updateSyncIndicator('syncing'); fullSync(); });
+window.addEventListener('offline', () => updateSyncIndicator('offline'));
+if (navigator.onLine) updateSyncIndicator('offline'); // will be updated after fullSync
 </script>
 </body>
 </html>

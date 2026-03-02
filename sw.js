@@ -1,5 +1,10 @@
-const CACHE_NAME = 'playbook-v8';
-const ASSETS = ['./', './index.html'];
+const CACHE_NAME = 'playbook-v10';
+const ASSETS = [
+  './',
+  './index.html',
+  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js',
+  'https://unpkg.com/konva@10.0.0-1/konva.min.js'
+];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(ASSETS)));
@@ -14,6 +19,11 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
+  // Skip caching for Supabase API requests — always go to network
+  if (e.request.url.includes('supabase.co')) {
+    e.respondWith(fetch(e.request));
+    return;
+  }
   e.respondWith(
     fetch(e.request).then(resp => {
       const clone = resp.clone();
