@@ -684,6 +684,169 @@
     cursor:pointer; backdrop-filter:blur(4px);
   }
   .diagram-edit-btn:active { transform:scale(0.95); }
+
+  /* ========= AI PLAY GENERATOR ========= */
+  .ai-header {
+    padding:12px 16px; display:flex; align-items:center; justify-content:space-between;
+  }
+  .ai-header h3 { font-size:14px; font-weight:700; color:var(--text2); text-transform:uppercase; }
+  .ai-settings-btn {
+    width:32px; height:32px; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface); cursor:pointer; font-size:16px; display:flex;
+    align-items:center; justify-content:center; transition:all .15s;
+  }
+  .ai-settings-btn:active { transform:scale(0.92); }
+  .ai-form-group {
+    padding:0 16px 12px;
+  }
+  .ai-form-group label {
+    display:block; font-size:12px; font-weight:600; color:var(--text2);
+    margin-bottom:6px; text-transform:uppercase; letter-spacing:0.3px;
+  }
+  .ai-form-group select, .ai-form-group input[type="text"], .ai-form-group input[type="password"] {
+    width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface); color:var(--text); font-size:14px; font-weight:500;
+    transition:border-color .15s;
+  }
+  .ai-form-group select:focus, .ai-form-group input:focus {
+    outline:none; border-color:var(--accent);
+  }
+  .ai-mode-toggle {
+    display:flex; gap:4px; padding:0 16px 12px;
+  }
+  .ai-mode-btn {
+    flex:1; padding:10px 12px; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface); color:var(--text2); font-size:13px; font-weight:600;
+    cursor:pointer; transition:all .15s; text-align:center;
+  }
+  .ai-mode-btn.active {
+    background:var(--accent); border-color:var(--accent); color:#fff;
+  }
+  .ai-mode-btn:active { transform:scale(0.97); }
+  .ai-generate-btn {
+    display:block; width:calc(100% - 32px); margin:4px 16px 16px; padding:14px;
+    border-radius:10px; border:none; font-size:15px; font-weight:700;
+    color:#fff; cursor:pointer; transition:all .15s;
+    background:linear-gradient(135deg, var(--accent2), var(--accent));
+  }
+  .ai-generate-btn:active { transform:scale(0.97); opacity:0.9; }
+  .ai-generate-btn:disabled { opacity:0.5; cursor:not-allowed; transform:none; }
+  .ai-loading {
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:40px 16px; gap:12px;
+  }
+  .ai-loading .ai-spinner {
+    width:40px; height:40px; border-radius:50%;
+    border:3px solid var(--border); border-top-color:var(--accent);
+    animation:ai-spin 0.8s linear infinite;
+  }
+  @keyframes ai-spin { to { transform:rotate(360deg); } }
+  .ai-loading .ai-loading-text {
+    font-size:14px; color:var(--text2); font-weight:500;
+    animation:ai-pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes ai-pulse { 0%,100%{opacity:0.6} 50%{opacity:1} }
+  .ai-strategy-banner {
+    margin:12px; padding:14px 16px; border-radius:var(--radius);
+    background:linear-gradient(135deg, rgba(108,92,231,0.15), rgba(79,140,255,0.15));
+    border:1px solid rgba(79,140,255,0.2);
+  }
+  .ai-strategy-banner .ai-strat-label {
+    font-size:11px; font-weight:700; text-transform:uppercase; color:var(--accent);
+    letter-spacing:0.5px; margin-bottom:6px;
+  }
+  .ai-strategy-banner .ai-strat-text {
+    font-size:14px; color:var(--text); line-height:1.5;
+  }
+  .ai-result-card {
+    display:flex; gap:12px; padding:14px 16px; margin:4px 12px;
+    background:var(--surface); border-radius:var(--radius);
+    border:1px solid transparent; transition:all .15s;
+  }
+  .ai-result-card:hover { border-color:var(--accent); }
+  .ai-result-order {
+    width:36px; height:36px; border-radius:10px;
+    background:linear-gradient(135deg, var(--accent), var(--accent2));
+    display:flex; align-items:center; justify-content:center;
+    font-size:16px; font-weight:800; color:#fff; flex-shrink:0;
+  }
+  .ai-result-info { flex:1; min-width:0; }
+  .ai-result-name { font-size:15px; font-weight:600; display:flex; align-items:center; gap:6px; }
+  .ai-new-badge {
+    display:inline-block; padding:2px 6px; border-radius:4px;
+    font-size:10px; font-weight:700; background:rgba(253,203,110,0.2); color:var(--orange);
+  }
+  .ai-result-rationale {
+    font-size:13px; color:var(--text2); margin-top:4px; line-height:1.4;
+  }
+  .ai-result-thumb {
+    width:60px; height:60px; border-radius:8px; overflow:hidden;
+    background:var(--surface2); flex-shrink:0;
+  }
+  .ai-result-thumb img { width:100%; height:100%; object-fit:cover; }
+  .ai-result-actions {
+    display:flex; gap:8px; padding:8px 12px 12px;
+  }
+  .ai-add-game-btn {
+    flex:1; padding:12px; border-radius:10px; border:none;
+    font-size:14px; font-weight:700; color:#fff; cursor:pointer;
+    background:var(--green); transition:all .15s;
+  }
+  .ai-add-game-btn:active { transform:scale(0.97); }
+  .ai-error {
+    margin:12px; padding:14px 16px; border-radius:var(--radius);
+    background:rgba(225,112,85,0.1); border:1px solid rgba(225,112,85,0.3);
+    color:var(--red); font-size:14px;
+  }
+  .ai-history-section {
+    padding:12px 16px 4px;
+  }
+  .ai-history-section h4 {
+    font-size:12px; font-weight:700; color:var(--text2); text-transform:uppercase;
+    letter-spacing:0.3px;
+  }
+  .ai-history-item {
+    padding:12px 16px; margin:4px 12px; background:var(--surface);
+    border-radius:var(--radius); cursor:pointer; transition:all .15s;
+  }
+  .ai-history-item:active { background:var(--surface2); }
+  .ai-history-defense { font-size:14px; font-weight:600; }
+  .ai-history-meta { font-size:12px; color:var(--text2); margin-top:2px; }
+  .ai-history-plays { font-size:12px; color:var(--accent); margin-top:4px; }
+  .ai-settings-modal {
+    padding:0;
+  }
+  .ai-settings-group {
+    padding:16px;
+  }
+  .ai-settings-group label {
+    display:block; font-size:12px; font-weight:600; color:var(--text2);
+    margin-bottom:6px; text-transform:uppercase;
+  }
+  .ai-settings-group select, .ai-settings-group input {
+    width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface2); color:var(--text); font-size:14px; margin-bottom:12px;
+  }
+  .ai-settings-save {
+    width:100%; padding:12px; border-radius:10px; border:none;
+    background:var(--accent); color:#fff; font-size:14px; font-weight:700;
+    cursor:pointer; transition:all .15s;
+  }
+  .ai-settings-save:active { transform:scale(0.97); }
+  .ai-offline-msg {
+    margin:12px; padding:20px 16px; border-radius:var(--radius);
+    background:var(--surface); text-align:center;
+  }
+  .ai-offline-msg .icon { font-size:32px; margin-bottom:8px; }
+  .ai-offline-msg .text { font-size:14px; color:var(--text2); }
+  .ai-new-play-routes {
+    margin-top:6px; padding:8px; background:var(--surface2); border-radius:6px;
+    font-size:12px; color:var(--text2);
+  }
+  .ai-new-play-routes .route-item {
+    display:flex; gap:6px; padding:2px 0;
+  }
+  .ai-new-play-routes .route-pos { font-weight:700; color:var(--accent); min-width:18px; }
 </style>
 </head>
 <body>
@@ -696,6 +859,7 @@
       <button class="nav-btn" onclick="showView('roster')">Roster</button>
       <button class="nav-btn" onclick="showView('games')">Games</button>
       <button class="nav-btn" onclick="showView('stats')">Stats</button>
+      <button class="nav-btn" onclick="showView('ai')">AI</button>
       <button class="nav-btn" onclick="showView('addplay')">+ Add</button>
     </div>
     <button class="theme-toggle" onclick="toggleTheme()" id="themeBtn" title="Toggle light/dark mode">&#127769;</button>
@@ -746,6 +910,11 @@
 
 <div id="view-stats" class="view">
   <div id="statsContent"></div>
+  <div class="bottom-spacer"></div>
+</div>
+
+<div id="view-ai" class="view">
+  <div id="aiContent"></div>
   <div class="bottom-spacer"></div>
 </div>
 
@@ -1330,9 +1499,13 @@ function showView(name) {
     document.getElementById('view-stats').classList.add('active');
     document.querySelectorAll('.nav-btn')[3].classList.add('active');
     renderStats();
+  } else if (name === 'ai') {
+    document.getElementById('view-ai').classList.add('active');
+    document.querySelectorAll('.nav-btn')[4].classList.add('active');
+    renderAI();
   } else if (name === 'addplay') {
     document.getElementById('view-addplay').classList.add('active');
-    document.querySelectorAll('.nav-btn')[4].classList.add('active');
+    document.querySelectorAll('.nav-btn')[5].classList.add('active');
     renderAddForm();
   }
 }
@@ -2696,9 +2869,10 @@ function renderActiveGame() {
     html += '<div class="empty-state" style="padding:30px 0;"><div class="icon">&#128203;</div><div>No plays added yet.<br>Tap below to build your sequence!</div></div>';
   }
 
-  // Add play button
+  // Add play button + AI button
   html += `<div class="seq-add-bar">
     <button class="seq-add-btn" onclick="showAddGamePlay()">+ Add Play to Sequence</button>
+    <button class="seq-add-btn" onclick="showView('ai')" style="background:linear-gradient(135deg,var(--accent2),var(--accent));color:#fff;margin-top:6px;">AI Generate Plays</button>
   </div>`;
 
   document.getElementById('gamesContent').innerHTML = html;
@@ -2917,6 +3091,593 @@ function assignPlayer(playNum, pos, playerName) {
   savePlays();
   document.getElementById('modalOverlay').classList.remove('active');
   showPlay(playNum);
+}
+
+// ============= AI PLAY GENERATOR =============
+const DEFENSE_TYPES = ['Cover 1','Cover 2','Cover 3','Cover 4','Man-to-Man','Zone Blitz','Prevent','2-Man Under','Cover 6'];
+const ANTHROPIC_MODELS = [
+  {id:'claude-sonnet-4-20250514', name:'Claude Sonnet 4'},
+  {id:'claude-haiku-4-20250414', name:'Claude Haiku 4'}
+];
+let aiMode = 'existing'; // 'existing' or 'suggest'
+let aiCurrentResult = null;
+
+function loadAISettings() {
+  try {
+    const s = localStorage.getItem('playbook_ai_settings');
+    if (s) return JSON.parse(s);
+  } catch(e) {}
+  return {
+    provider: 'anthropic',
+    anthropic: { apiKey: '', model: 'claude-sonnet-4-20250514' },
+    ollama: { endpoint: 'http://localhost:11434', model: 'llama3.1' },
+    proxyUrl: SUPABASE_URL + '/functions/v1/ai-proxy'
+  };
+}
+
+function saveAISettings(settings) {
+  localStorage.setItem('playbook_ai_settings', JSON.stringify(settings));
+}
+
+function loadAIHistory() {
+  try {
+    const s = localStorage.getItem('playbook_ai_history');
+    if (s) return JSON.parse(s);
+  } catch(e) {}
+  return [];
+}
+
+function saveAIResult(result) {
+  const history = loadAIHistory();
+  history.unshift(result);
+  if (history.length > 20) history.length = 20;
+  localStorage.setItem('playbook_ai_history', JSON.stringify(history));
+}
+
+function buildAIPrompt(defense, mode, gameId) {
+  // Serialize playbook
+  let playbookText = 'PLAYBOOK (' + plays.length + ' plays):\n';
+  plays.forEach(p => {
+    const positions = ['C','Q','W','X','Y','Z'].map(pos => pos + ':' + (p[pos] || '-')).join(', ');
+    playbookText += '#' + p.num + ' "' + p.type + '" - ' + p.action + ' | ' + positions + '\n';
+  });
+
+  // Gather stats
+  let statsText = '';
+  if (gameId && gameId !== '__none__') {
+    const relevantLogs = gameId === '__all__' ? gameLogs : { [gameId]: gameLogs[gameId] };
+    const playStats = {};
+    plays.forEach(p => { playStats[p.type] = { success: 0, fail: 0, total: 0 }; });
+
+    Object.values(relevantLogs).forEach(log => {
+      if (!log) return;
+      Object.entries(log).forEach(([playType, entries]) => {
+        const arr = Array.isArray(entries) ? entries : [entries];
+        arr.forEach(e => {
+          if (!playStats[playType]) playStats[playType] = { success: 0, fail: 0, total: 0 };
+          playStats[playType].total++;
+          if (e.result === 'SUCCESS') playStats[playType].success++;
+          else if (e.result === 'FAIL') playStats[playType].fail++;
+        });
+      });
+    });
+
+    // Also check game calls for stats
+    const relevantGames = gameId === '__all__' ? games : games.filter(g => g.id === gameId);
+    relevantGames.forEach(g => {
+      if (!g.calls) return;
+      g.calls.forEach(c => {
+        const pt = c.playType;
+        if (!playStats[pt]) playStats[pt] = { success: 0, fail: 0, total: 0 };
+        playStats[pt].total++;
+        if (c.result === 'SUCCESS') playStats[pt].success++;
+        else if (c.result === 'FAIL') playStats[pt].fail++;
+      });
+    });
+
+    const hasStats = Object.values(playStats).some(s => s.total > 0);
+    if (hasStats) {
+      statsText = '\nGAME STATS:\n';
+      Object.entries(playStats).forEach(([name, s]) => {
+        if (s.total > 0) {
+          const rate = Math.round(s.success / s.total * 100);
+          statsText += '"' + name + '": ' + s.success + '/' + s.total + ' (' + rate + '% success)\n';
+        }
+      });
+    }
+  }
+
+  const systemPrompt = `You are an expert youth flag football offensive coordinator. You analyze defensive schemes and create strategic play sequences.
+
+RULES:
+- 6-player flag football: Center (C), Quarterback (Q), W, X, Y, Z receivers/runners
+- No blocking allowed — all plays are passing or designed QB runs/handoffs
+- Flag pull = tackle
+
+DEFENSE COVERAGE KNOWLEDGE:
+- Cover 1: Single high safety, man coverage underneath. Vulnerable to crossing routes, pick plays, deep posts.
+- Cover 2: Two deep safeties, corners play flats. Vulnerable to deep middle seams, corner routes, skinny posts.
+- Cover 3: Three deep zones, four underneath. Vulnerable to flat routes, curl/comeback routes, seam routes between zones.
+- Cover 4: Four deep zones. Vulnerable to underneath crossing routes, short curls, designed runs.
+- Man-to-Man: Each defender assigned a receiver. Vulnerable to picks/rubs, speed mismatches, misdirection.
+- Zone Blitz: Zone coverage with extra rushers. Vulnerable to hot routes, quick slants, screens to vacated areas.
+- Prevent: Deep zones, soft coverage. Vulnerable to short/intermediate routes, designed runs, RAC plays.
+- 2-Man Under: Two deep safeties with man-to-man under. Vulnerable to rub routes, out-breaking routes, levels concepts.
+- Cover 6: Cover 4 on one side, Cover 2 on other. Vulnerable to attacking the Cover 2 side deep, four verticals.
+
+SEQUENCING STRATEGY:
+1. First 1-2 plays should establish a tendency or test the defense
+2. Middle plays should set up the later plays (e.g., run to set up play-action concept)
+3. Final plays should exploit what the sequence has established
+4. Vary play types (mix passes and runs) to be unpredictable
+5. Consider down-and-distance scenarios
+
+${mode === 'suggest' ? `MODE: You may suggest NEW play concepts not in the playbook. For new plays, provide:
+- A creative play name
+- Full route descriptions for each position (C, Q, W, X, Y, Z)
+- Why this new concept works against the specified defense
+Mark new plays with isNew: true.` : 'MODE: Only select plays from the existing playbook. Do NOT invent new plays.'}
+
+OUTPUT FORMAT — respond with ONLY valid JSON, no markdown fences:
+{
+  "overallStrategy": "Brief 1-2 sentence strategy description",
+  "block": [
+    {
+      "order": 1,
+      "playNum": 7,
+      "playType": "Circle - Run Option",
+      "rationale": "Why this play works here against the defense",
+      "isNew": false
+    }
+  ]
+}
+
+${mode === 'suggest' ? `For new plays, use this format:
+{
+  "order": 2,
+  "playNum": null,
+  "playType": "New: Fake Sweep Screen",
+  "rationale": "Why this play works",
+  "isNew": true,
+  "description": "Brief play concept description",
+  "routes": {"C":"Snap and block left","Q":"Fake sweep right, throw screen left","W":"Run a go route","X":"Screen route - settle in flat","Y":"Crossing route","Z":"Clear out deep"}
+}` : ''}
+
+Generate a block of 3-5 plays sequenced strategically.`;
+
+  const userMessage = `Defense: ${defense}
+${playbookText}
+${statsText}
+Generate a strategic play block of 3-5 plays to attack this ${defense} defense.${statsText ? ' Use the game stats to identify which plays have been working and which haven\'t.' : ''}`;
+
+  return { systemPrompt, userMessage };
+}
+
+async function callAI(systemPrompt, userMessage) {
+  const settings = loadAISettings();
+
+  if (settings.provider === 'anthropic') {
+    if (!settings.anthropic.apiKey) throw new Error('No Anthropic API key configured. Tap the gear icon to add your key.');
+    const proxyUrl = settings.proxyUrl || SUPABASE_URL + '/functions/v1/ai-proxy';
+    const resp = await fetch(proxyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'anthropic',
+        model: settings.anthropic.model || 'claude-sonnet-4-20250514',
+        messages: [
+          { role: 'user', content: userMessage }
+        ],
+        system: systemPrompt,
+        apiKey: settings.anthropic.apiKey
+      })
+    });
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => '');
+      if (resp.status === 401) throw new Error('Invalid API key. Check your Anthropic API key in settings.');
+      if (resp.status === 429) throw new Error('Rate limited. Please wait a moment and try again.');
+      throw new Error('API error (' + resp.status + '): ' + (errText || 'Unknown error'));
+    }
+    const data = await resp.json();
+    if (data.content && data.content[0] && data.content[0].text) return data.content[0].text;
+    if (data.error) throw new Error(data.error.message || data.error);
+    throw new Error('Unexpected API response format');
+  } else if (settings.provider === 'ollama') {
+    const endpoint = settings.ollama.endpoint || 'http://localhost:11434';
+    const resp = await fetch(endpoint + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: settings.ollama.model || 'llama3.1',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage }
+        ],
+        stream: false,
+        format: 'json'
+      })
+    });
+    if (!resp.ok) {
+      throw new Error('Ollama error (' + resp.status + '). Is Ollama running at ' + endpoint + '?');
+    }
+    const data = await resp.json();
+    if (data.message && data.message.content) return data.message.content;
+    throw new Error('Unexpected Ollama response format');
+  } else {
+    throw new Error('Unknown AI provider: ' + settings.provider);
+  }
+}
+
+function renderAI() {
+  const c = document.getElementById('aiContent');
+  const settings = loadAISettings();
+  const history = loadAIHistory();
+  const gameOptions = games.map(g => '<option value="' + g.id + '">' + g.name || ('vs ' + g.opponent) + '</option>').join('');
+
+  let html = '<div class="ai-header"><h3>AI Play Generator</h3>';
+  html += '<button class="ai-settings-btn" onclick="showAISettings()" title="AI Settings">&#9881;</button></div>';
+
+  if (!navigator.onLine) {
+    html += '<div class="ai-offline-msg"><div class="icon">&#128268;</div><div class="text">You\'re offline. AI generation requires an internet connection.</div></div>';
+    if (history.length > 0) {
+      html += '<div class="ai-history-section"><h4>Cached Results</h4></div>';
+      history.forEach((h, i) => {
+        const playNames = h.block.map(b => b.playType).join(', ');
+        html += '<div class="ai-history-item" onclick="showAIHistoryResult(' + i + ')">';
+        html += '<div class="ai-history-defense">vs ' + h.defense + '</div>';
+        html += '<div class="ai-history-meta">' + h.mode + ' mode &middot; ' + h.block.length + ' plays</div>';
+        html += '<div class="ai-history-plays">' + playNames + '</div></div>';
+      });
+    }
+    c.innerHTML = html;
+    return;
+  }
+
+  // Provider status
+  const providerLabel = settings.provider === 'anthropic' ? 'Claude' : 'Ollama';
+  const hasKey = settings.provider === 'anthropic' ? !!settings.anthropic.apiKey : true;
+  html += '<div style="padding:0 16px 8px;font-size:12px;color:var(--text2);">Provider: <strong>' + providerLabel + '</strong>';
+  if (!hasKey) html += ' <span style="color:var(--red);">(no API key)</span>';
+  html += '</div>';
+
+  // Defense selector
+  html += '<div class="ai-form-group"><label>Opposing Defense</label>';
+  html += '<select id="aiDefenseSelect">';
+  html += '<option value="">-- Select Defense --</option>';
+  DEFENSE_TYPES.forEach(d => { html += '<option value="' + d + '">' + d + '</option>'; });
+  html += '</select></div>';
+
+  // Mode toggle
+  html += '<div class="ai-mode-toggle">';
+  html += '<button class="ai-mode-btn' + (aiMode === 'existing' ? ' active' : '') + '" onclick="setAIMode(\'existing\')">Use My Playbook</button>';
+  html += '<button class="ai-mode-btn' + (aiMode === 'suggest' ? ' active' : '') + '" onclick="setAIMode(\'suggest\')">Suggest New</button>';
+  html += '</div>';
+
+  // Game context selector
+  html += '<div class="ai-form-group"><label>Game Context (optional)</label>';
+  html += '<select id="aiGameSelect">';
+  html += '<option value="__none__">No game stats</option>';
+  games.forEach(g => {
+    const label = g.opponent ? ('vs ' + g.opponent + ' - ' + g.date) : g.name;
+    html += '<option value="' + g.id + '">' + label + '</option>';
+  });
+  html += '<option value="__all__">All Games Combined</option>';
+  html += '</select></div>';
+
+  // Generate button
+  html += '<button class="ai-generate-btn" onclick="generatePlayBlock()"' + (!hasKey && settings.provider === 'anthropic' ? ' disabled' : '') + '>Generate Play Block</button>';
+
+  // Results area
+  html += '<div id="aiResultsArea"></div>';
+
+  // History
+  if (history.length > 0) {
+    html += '<div class="ai-history-section"><h4>History</h4></div>';
+    history.forEach((h, i) => {
+      const playNames = h.block.map(b => b.playType).join(', ');
+      html += '<div class="ai-history-item" onclick="showAIHistoryResult(' + i + ')">';
+      html += '<div class="ai-history-defense">vs ' + h.defense + '</div>';
+      html += '<div class="ai-history-meta">' + h.mode + ' mode &middot; ' + h.block.length + ' plays</div>';
+      html += '<div class="ai-history-plays">' + playNames + '</div></div>';
+    });
+  }
+
+  c.innerHTML = html;
+}
+
+function setAIMode(mode) {
+  aiMode = mode;
+  document.querySelectorAll('.ai-mode-btn').forEach(b => b.classList.remove('active'));
+  if (mode === 'existing') document.querySelectorAll('.ai-mode-btn')[0].classList.add('active');
+  else document.querySelectorAll('.ai-mode-btn')[1].classList.add('active');
+}
+
+function showAILoading() {
+  const area = document.getElementById('aiResultsArea');
+  if (!area) return;
+  area.innerHTML = '<div class="ai-loading"><div class="ai-spinner"></div><div class="ai-loading-text">Analyzing defense and building plays...</div></div>';
+}
+
+function showAIError(msg) {
+  const area = document.getElementById('aiResultsArea');
+  if (!area) return;
+  area.innerHTML = '<div class="ai-error">' + msg + '</div>';
+}
+
+function showAIResults(result) {
+  const area = document.getElementById('aiResultsArea');
+  if (!area) return;
+  aiCurrentResult = result;
+
+  let html = '';
+
+  // Strategy banner
+  if (result.overallStrategy) {
+    html += '<div class="ai-strategy-banner">';
+    html += '<div class="ai-strat-label">Overall Strategy</div>';
+    html += '<div class="ai-strat-text">' + result.overallStrategy + '</div>';
+    html += '</div>';
+  }
+
+  // Play cards
+  result.block.forEach(b => {
+    html += '<div class="ai-result-card">';
+    html += '<div class="ai-result-order">' + b.order + '</div>';
+    html += '<div class="ai-result-info">';
+    html += '<div class="ai-result-name">' + b.playType;
+    if (b.isNew) html += ' <span class="ai-new-badge">NEW</span>';
+    html += '</div>';
+    html += '<div class="ai-result-rationale">' + b.rationale + '</div>';
+
+    // Show routes for new plays
+    if (b.isNew && b.routes) {
+      html += '<div class="ai-new-play-routes">';
+      if (b.description) html += '<div style="margin-bottom:4px;color:var(--text);font-weight:600;">' + b.description + '</div>';
+      ['C','Q','W','X','Y','Z'].forEach(pos => {
+        if (b.routes[pos]) {
+          html += '<div class="route-item"><span class="route-pos">' + pos + '</span><span>' + b.routes[pos] + '</span></div>';
+        }
+      });
+      html += '</div>';
+    }
+
+    html += '</div>';
+
+    // Diagram thumbnail for existing plays
+    if (!b.isNew && b.playNum) {
+      const play = plays.find(p => p.num === b.playNum);
+      const diagramKey = play ? play.type : b.playType;
+      if (typeof diagrams !== 'undefined' && diagrams[diagramKey]) {
+        const img = diagrams[diagramKey];
+        const mime = img.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
+        html += '<div class="ai-result-thumb"><img src="data:' + mime + ';base64,' + img + '" alt="' + diagramKey + '"></div>';
+      }
+    }
+
+    html += '</div>';
+  });
+
+  // Add to game button
+  html += '<div class="ai-result-actions">';
+  html += '<button class="ai-add-game-btn" onclick="addAIBlockToGame()">Add All to Game</button>';
+  html += '</div>';
+
+  area.innerHTML = html;
+}
+
+async function generatePlayBlock() {
+  const defenseSelect = document.getElementById('aiDefenseSelect');
+  const gameSelect = document.getElementById('aiGameSelect');
+  const defense = defenseSelect ? defenseSelect.value : '';
+  const gameId = gameSelect ? gameSelect.value : '__none__';
+
+  if (!defense) { showAIError('Please select a defensive scheme.'); return; }
+  if (!navigator.onLine) { showAIError('You are offline. AI generation requires an internet connection.'); return; }
+
+  const settings = loadAISettings();
+  if (settings.provider === 'anthropic' && !settings.anthropic.apiKey) {
+    showAIError('No API key configured. Tap the gear icon to set up your Anthropic API key.');
+    return;
+  }
+
+  showAILoading();
+
+  try {
+    const { systemPrompt, userMessage } = buildAIPrompt(defense, aiMode, gameId);
+    const raw = await callAI(systemPrompt, userMessage);
+
+    // Parse JSON — strip markdown fences if present
+    let cleaned = raw.trim();
+    if (cleaned.startsWith('```')) {
+      cleaned = cleaned.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+    }
+    const parsed = JSON.parse(cleaned);
+
+    // Validate play references
+    if (parsed.block && Array.isArray(parsed.block)) {
+      parsed.block.forEach(b => {
+        if (!b.isNew && b.playNum) {
+          const exists = plays.find(p => p.num === b.playNum);
+          if (!exists) {
+            // Try to match by name
+            const byName = plays.find(p => p.type === b.playType);
+            if (byName) b.playNum = byName.num;
+          }
+        }
+        // Also try to set playNum from playType if missing
+        if (!b.isNew && !b.playNum && b.playType) {
+          const match = plays.find(p => p.type === b.playType);
+          if (match) b.playNum = match.num;
+        }
+      });
+    }
+
+    // Build result object
+    const result = {
+      id: 'ai_' + Date.now(),
+      defense: defense,
+      mode: aiMode,
+      overallStrategy: parsed.overallStrategy || '',
+      block: parsed.block || []
+    };
+
+    saveAIResult(result);
+    showAIResults(result);
+  } catch(e) {
+    console.error('AI generation error:', e);
+    if (e instanceof SyntaxError) {
+      showAIError('Failed to parse AI response. The model returned invalid JSON. Try again.');
+    } else {
+      showAIError(e.message || 'An unexpected error occurred.');
+    }
+  }
+}
+
+function addAIBlockToGame() {
+  if (!aiCurrentResult || !aiCurrentResult.block) return;
+
+  if (!activeGameId) {
+    // Show game picker
+    let html = '<div class="picker-title"><h3>Add to Game</h3></div>';
+    if (games.length === 0) {
+      html += '<p style="color:var(--text2);font-size:14px;padding:8px 0;">No games created yet. Create a game in the Games tab first.</p>';
+    } else {
+      html += '<ul class="picker-list">';
+      games.forEach(g => {
+        const label = g.opponent ? ('vs ' + g.opponent) : g.name;
+        html += '<li onclick="selectGameForAI(\'' + g.id + '\')">' + label + ' (' + g.date + ')</li>';
+      });
+      html += '</ul>';
+    }
+    document.getElementById('modalBox').innerHTML = html;
+    document.getElementById('modalOverlay').classList.add('active');
+    return;
+  }
+
+  pushAIBlockToGame(activeGameId);
+}
+
+function selectGameForAI(gameId) {
+  document.getElementById('modalOverlay').classList.remove('active');
+  pushAIBlockToGame(gameId);
+}
+
+function pushAIBlockToGame(gameId) {
+  const game = games.find(g => g.id === gameId);
+  if (!game || !aiCurrentResult) return;
+  if (!game.calls) game.calls = [];
+
+  aiCurrentResult.block.forEach(b => {
+    if (b.isNew) {
+      // New play — add with description
+      game.calls.push({
+        playNum: null,
+        playType: b.playType,
+        result: '',
+        C: '', Q: '', W: '', X: '', Y: '', Z: '',
+        time: new Date().toLocaleTimeString(),
+        isAISuggested: true,
+        aiDescription: b.description || '',
+        aiRoutes: b.routes || {}
+      });
+    } else {
+      // Existing play
+      const play = plays.find(p => p.num === b.playNum) || plays.find(p => p.type === b.playType);
+      game.calls.push({
+        playNum: b.playNum || (play ? play.num : null),
+        playType: b.playType,
+        result: '',
+        C: play ? (play.C || '') : '', Q: play ? (play.Q || '') : '',
+        W: play ? (play.W || '') : '', X: play ? (play.X || '') : '',
+        Y: play ? (play.Y || '') : '', Z: play ? (play.Z || '') : '',
+        time: new Date().toLocaleTimeString()
+      });
+    }
+  });
+
+  saveGames();
+  activeGameId = gameId;
+  showView('games');
+}
+
+function showAIHistoryResult(index) {
+  const history = loadAIHistory();
+  if (!history[index]) return;
+  aiCurrentResult = history[index];
+  const area = document.getElementById('aiResultsArea');
+  if (area) showAIResults(history[index]);
+  else {
+    // If viewing from offline, re-render
+    renderAI();
+    setTimeout(() => showAIResults(history[index]), 50);
+  }
+}
+
+function showAISettings() {
+  const settings = loadAISettings();
+  let html = '<div class="ai-settings-modal">';
+  html += '<div class="ai-settings-group">';
+  html += '<h3 style="margin-bottom:16px;">AI Settings</h3>';
+
+  // Provider toggle
+  html += '<label>Provider</label>';
+  html += '<select id="aiSettingsProvider" onchange="toggleAISettingsFields()">';
+  html += '<option value="anthropic"' + (settings.provider === 'anthropic' ? ' selected' : '') + '>Anthropic (Claude)</option>';
+  html += '<option value="ollama"' + (settings.provider === 'ollama' ? ' selected' : '') + '>Ollama (Local)</option>';
+  html += '</select>';
+
+  // Anthropic fields
+  html += '<div id="aiSettingsAnthropic" style="' + (settings.provider !== 'anthropic' ? 'display:none;' : '') + '">';
+  html += '<label>API Key</label>';
+  html += '<input type="password" id="aiSettingsApiKey" value="' + (settings.anthropic.apiKey || '') + '" placeholder="sk-ant-...">';
+  html += '<label>Model</label>';
+  html += '<select id="aiSettingsModel">';
+  ANTHROPIC_MODELS.forEach(m => {
+    html += '<option value="' + m.id + '"' + (settings.anthropic.model === m.id ? ' selected' : '') + '>' + m.name + '</option>';
+  });
+  html += '</select>';
+  html += '<label>Proxy URL</label>';
+  html += '<input type="text" id="aiSettingsProxy" value="' + (settings.proxyUrl || SUPABASE_URL + '/functions/v1/ai-proxy') + '" placeholder="Edge function URL">';
+  html += '</div>';
+
+  // Ollama fields
+  html += '<div id="aiSettingsOllama" style="' + (settings.provider !== 'ollama' ? 'display:none;' : '') + '">';
+  html += '<label>Endpoint</label>';
+  html += '<input type="text" id="aiSettingsEndpoint" value="' + (settings.ollama.endpoint || 'http://localhost:11434') + '">';
+  html += '<label>Model</label>';
+  html += '<input type="text" id="aiSettingsOllamaModel" value="' + (settings.ollama.model || 'llama3.1') + '" placeholder="llama3.1">';
+  html += '</div>';
+
+  html += '<button class="ai-settings-save" onclick="saveAISettingsFromModal()">Save Settings</button>';
+  html += '</div></div>';
+
+  document.getElementById('modalBox').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('active');
+}
+
+function toggleAISettingsFields() {
+  const provider = document.getElementById('aiSettingsProvider').value;
+  document.getElementById('aiSettingsAnthropic').style.display = provider === 'anthropic' ? '' : 'none';
+  document.getElementById('aiSettingsOllama').style.display = provider === 'ollama' ? '' : 'none';
+}
+
+function saveAISettingsFromModal() {
+  const provider = document.getElementById('aiSettingsProvider').value;
+  const settings = {
+    provider: provider,
+    anthropic: {
+      apiKey: document.getElementById('aiSettingsApiKey').value.trim(),
+      model: document.getElementById('aiSettingsModel').value
+    },
+    ollama: {
+      endpoint: document.getElementById('aiSettingsEndpoint').value.trim(),
+      model: document.getElementById('aiSettingsOllamaModel').value.trim()
+    },
+    proxyUrl: document.getElementById('aiSettingsProxy').value.trim()
+  };
+  saveAISettings(settings);
+  document.getElementById('modalOverlay').classList.remove('active');
+  renderAI();
 }
 
 // ============= MODAL =============

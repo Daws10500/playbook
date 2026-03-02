@@ -1,4 +1,4 @@
-const CACHE_NAME = 'playbook-v10';
+const CACHE_NAME = 'playbook-v11';
 const ASSETS = [
   './',
   './index.html',
@@ -19,8 +19,8 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  // Skip caching for Supabase API requests — always go to network
-  if (e.request.url.includes('supabase.co')) {
+  // Skip caching for Supabase API requests and Edge Functions — always go to network
+  if (e.request.url.includes('supabase.co') || e.request.url.includes('/functions/v1/')) {
     e.respondWith(fetch(e.request));
     return;
   }
