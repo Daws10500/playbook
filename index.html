@@ -847,6 +847,31 @@
     display:flex; gap:6px; padding:2px 0;
   }
   .ai-new-play-routes .route-pos { font-weight:700; color:var(--accent); min-width:18px; }
+  .ai-model-desc {
+    font-size:12px; color:var(--text2); margin:-6px 0 12px; padding:4px 0; line-height:1.4;
+  }
+  .ai-thinking-toggle {
+    margin-bottom:12px;
+  }
+  .ai-thinking-toggle input[type="checkbox"] {
+    width:18px; height:18px; accent-color:var(--accent); cursor:pointer;
+  }
+  .ai-thinking-toggle input[type="checkbox"]:disabled {
+    opacity:0.4; cursor:not-allowed;
+  }
+  .ai-temp-slider {
+    width:100%; height:6px; -webkit-appearance:none; appearance:none;
+    background:var(--border); border-radius:3px; outline:none; margin-bottom:12px;
+  }
+  .ai-temp-slider::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none; width:20px; height:20px;
+    border-radius:50%; background:var(--accent); cursor:pointer; border:2px solid var(--surface);
+    box-shadow:0 1px 4px rgba(0,0,0,0.2);
+  }
+  .ai-temp-slider::-moz-range-thumb {
+    width:20px; height:20px; border-radius:50%; background:var(--accent);
+    cursor:pointer; border:2px solid var(--surface); box-shadow:0 1px 4px rgba(0,0,0,0.2);
+  }
 </style>
 </head>
 <body>
@@ -1015,7 +1040,9 @@ async function fullSync() {
       games:    { get: () => localStorage.getItem('playbook_games'),    set: v => { games = JSON.parse(v); localStorage.setItem('playbook_games', v); } },
       roster:   { get: () => localStorage.getItem('playbook_roster'),   set: v => { roster = JSON.parse(v); localStorage.setItem('playbook_roster', v); } },
       gamelogs: { get: () => localStorage.getItem('playbook_gamelogs'), set: v => { gameLogs = JSON.parse(v); localStorage.setItem('playbook_gamelogs', v); } },
-      theme:    { get: () => localStorage.getItem('playbook_theme'),    set: v => { localStorage.setItem('playbook_theme', v); document.documentElement.setAttribute('data-theme', v); document.getElementById('themeBtn').innerHTML = v === 'light' ? '&#9728;&#65039;' : '&#127769;'; } }
+      theme:    { get: () => localStorage.getItem('playbook_theme'),    set: v => { localStorage.setItem('playbook_theme', v); document.documentElement.setAttribute('data-theme', v); document.getElementById('themeBtn').innerHTML = v === 'light' ? '&#9728;&#65039;' : '&#127769;'; } },
+      ollama_models: { get: () => localStorage.getItem('playbook_ollama_models'), set: v => { localStorage.setItem('playbook_ollama_models', v); } },
+      ai_settings:   { get: () => localStorage.getItem('playbook_ai_settings'),   set: v => { localStorage.setItem('playbook_ai_settings', v); } }
     };
 
     let changed = false;
@@ -3096,21 +3123,78 @@ function assignPlayer(playNum, pos, playerName) {
 // ============= AI PLAY GENERATOR =============
 const DEFENSE_TYPES = ['Cover 1','Cover 2','Cover 3','Cover 4','Man-to-Man','Zone Blitz','Prevent','2-Man Under','Cover 6'];
 const ANTHROPIC_MODELS = [
-  {id:'claude-sonnet-4-20250514', name:'Claude Sonnet 4'},
-  {id:'claude-haiku-4-20250414', name:'Claude Haiku 4'}
+  {id:'claude-sonnet-4-6', name:'Claude Sonnet 4.6'},
+  {id:'claude-haiku-4-5-20251001', name:'Claude Haiku 4.5'}
+];
+const OLLAMA_DEFAULT_MODELS = [
+  {
+    id: 'gemini-3-flash-preview',
+    name: 'Gemini 3 Flash Preview',
+    contextWindow: 1048576,
+    supportsThinking: true,
+    defaultTemperature: 0.7,
+    defaultNumCtx: 8192,
+    description: 'Google Gemini — fast, strong reasoning, 1M context'
+  },
+  {
+    id: 'deepseek-v3.2',
+    name: 'DeepSeek V3.2',
+    contextWindow: 163840,
+    supportsThinking: true,
+    defaultTemperature: 0.7,
+    defaultNumCtx: 8192,
+    description: 'DeepSeek — strong reasoning & agent performance, 160K context'
+  },
+  {
+    id: 'qwen3-coder-next',
+    name: 'Qwen3 Coder Next',
+    contextWindow: 262144,
+    supportsThinking: false,
+    defaultTemperature: 0.7,
+    defaultNumCtx: 8192,
+    description: 'Qwen — fast coding agent, non-thinking only, 256K context'
+  }
 ];
 let aiMode = 'existing'; // 'existing' or 'suggest'
 let aiCurrentResult = null;
 
+function loadOllamaModels() {
+  try {
+    const s = localStorage.getItem('playbook_ollama_models');
+    if (s) {
+      const saved = JSON.parse(s);
+      // Merge with defaults so new built-in models are always present
+      const ids = new Set(saved.map(m => m.id));
+      OLLAMA_DEFAULT_MODELS.forEach(m => { if (!ids.has(m.id)) saved.push(m); });
+      return saved;
+    }
+  } catch(e) {}
+  return [...OLLAMA_DEFAULT_MODELS];
+}
+
+function saveOllamaModels(models) {
+  localStorage.setItem('playbook_ollama_models', JSON.stringify(models));
+}
+
 function loadAISettings() {
   try {
     const s = localStorage.getItem('playbook_ai_settings');
-    if (s) return JSON.parse(s);
+    if (s) {
+      const parsed = JSON.parse(s);
+      // Migrate old ollama settings that lack new fields
+      if (parsed.ollama && !('thinking' in parsed.ollama)) {
+        const card = loadOllamaModels().find(m => m.id === parsed.ollama.model);
+        parsed.ollama.thinking = card ? card.supportsThinking : false;
+        parsed.ollama.temperature = card ? card.defaultTemperature : 0.7;
+        parsed.ollama.numCtx = card ? card.defaultNumCtx : 8192;
+      }
+      return parsed;
+    }
   } catch(e) {}
   return {
     provider: 'anthropic',
-    anthropic: { apiKey: '', model: 'claude-sonnet-4-20250514' },
-    ollama: { endpoint: 'http://localhost:11434', model: 'llama3.1' },
+    anthropic: { apiKey: '', model: 'claude-sonnet-4-6' },
+    ollama: { endpoint: 'http://localhost:11434', model: 'gemini-3-flash-preview', thinking: true, temperature: 0.7, numCtx: 8192 },
     proxyUrl: SUPABASE_URL + '/functions/v1/ai-proxy'
   };
 }
@@ -3264,7 +3348,7 @@ async function callAI(systemPrompt, userMessage) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         provider: 'anthropic',
-        model: settings.anthropic.model || 'claude-sonnet-4-20250514',
+        model: settings.anthropic.model || 'claude-sonnet-4-6',
         messages: [
           { role: 'user', content: userMessage }
         ],
@@ -3284,18 +3368,27 @@ async function callAI(systemPrompt, userMessage) {
     throw new Error('Unexpected API response format');
   } else if (settings.provider === 'ollama') {
     const endpoint = settings.ollama.endpoint || 'http://localhost:11434';
+    const modelId = settings.ollama.model || 'gemini-3-flash-preview';
+    const modelCard = loadOllamaModels().find(m => m.id === modelId);
+    const useThinking = modelCard && modelCard.supportsThinking && settings.ollama.thinking;
+    const reqBody = {
+      model: modelId,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage }
+      ],
+      stream: false,
+      format: 'json',
+      options: {
+        temperature: settings.ollama.temperature != null ? settings.ollama.temperature : 0.7,
+        num_ctx: settings.ollama.numCtx || 8192
+      }
+    };
+    if (useThinking) reqBody.think = true;
     const resp = await fetch(endpoint + '/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: settings.ollama.model || 'llama3.1',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage }
-        ],
-        stream: false,
-        format: 'json'
-      })
+      body: JSON.stringify(reqBody)
     });
     if (!resp.ok) {
       throw new Error('Ollama error (' + resp.status + '). Is Ollama running at ' + endpoint + '?');
@@ -3334,10 +3427,20 @@ function renderAI() {
   }
 
   // Provider status
-  const providerLabel = settings.provider === 'anthropic' ? 'Claude' : 'Ollama';
   const hasKey = settings.provider === 'anthropic' ? !!settings.anthropic.apiKey : true;
-  html += '<div style="padding:0 16px 8px;font-size:12px;color:var(--text2);">Provider: <strong>' + providerLabel + '</strong>';
-  if (!hasKey) html += ' <span style="color:var(--red);">(no API key)</span>';
+  html += '<div style="padding:0 16px 8px;font-size:12px;color:var(--text2);">';
+  if (settings.provider === 'anthropic') {
+    const aModel = ANTHROPIC_MODELS.find(m => m.id === settings.anthropic.model);
+    html += 'Provider: <strong>Claude</strong>';
+    if (aModel) html += ' &mdash; ' + aModel.name;
+    if (!hasKey) html += ' <span style="color:var(--red);">(no API key)</span>';
+  } else {
+    const oCard = loadOllamaModels().find(m => m.id === settings.ollama.model);
+    const modelName = oCard ? oCard.name : settings.ollama.model;
+    const thinkLabel = oCard && oCard.supportsThinking ? (settings.ollama.thinking ? 'thinking ON' : 'thinking OFF') : 'no thinking';
+    const ctxLabel = (settings.ollama.numCtx || 8192) >= 1024 ? ((settings.ollama.numCtx || 8192) / 1024) + 'K ctx' : (settings.ollama.numCtx || 8192) + ' ctx';
+    html += 'Provider: <strong>Ollama</strong> &mdash; ' + modelName + ' (' + thinkLabel + ', ' + ctxLabel + ', temp ' + (settings.ollama.temperature != null ? settings.ollama.temperature : 0.7) + ')';
+  }
   html += '</div>';
 
   // Defense selector
@@ -3641,11 +3744,46 @@ function showAISettings() {
   html += '</div>';
 
   // Ollama fields
+  const ollamaModels = loadOllamaModels();
+  const selectedCard = ollamaModels.find(m => m.id === settings.ollama.model) || ollamaModels[0];
   html += '<div id="aiSettingsOllama" style="' + (settings.provider !== 'ollama' ? 'display:none;' : '') + '">';
   html += '<label>Endpoint</label>';
   html += '<input type="text" id="aiSettingsEndpoint" value="' + (settings.ollama.endpoint || 'http://localhost:11434') + '">';
+
+  // Model dropdown
   html += '<label>Model</label>';
-  html += '<input type="text" id="aiSettingsOllamaModel" value="' + (settings.ollama.model || 'llama3.1') + '" placeholder="llama3.1">';
+  html += '<select id="aiSettingsOllamaModel" onchange="onOllamaModelChange()">';
+  ollamaModels.forEach(m => {
+    html += '<option value="' + m.id + '"' + (settings.ollama.model === m.id ? ' selected' : '') + '>' + m.name + '</option>';
+  });
+  html += '</select>';
+  html += '<div id="ollamaModelDesc" class="ai-model-desc">' + selectedCard.description + '</div>';
+
+  // Thinking toggle
+  html += '<div class="ai-thinking-toggle">';
+  html += '<label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:14px;cursor:pointer;">';
+  html += '<input type="checkbox" id="aiSettingsThinking"' + (settings.ollama.thinking && selectedCard.supportsThinking ? ' checked' : '') + (selectedCard.supportsThinking ? '' : ' disabled') + '>';
+  html += '<span>Enable Thinking</span>';
+  html += '<span id="aiThinkingStatus" style="font-size:12px;color:var(--text2);">' + (selectedCard.supportsThinking ? '' : '(not supported)') + '</span>';
+  html += '</label></div>';
+
+  // Temperature slider
+  html += '<label>Temperature <span id="aiTempValue" style="font-weight:400;color:var(--accent);">' + (settings.ollama.temperature != null ? settings.ollama.temperature : selectedCard.defaultTemperature) + '</span></label>';
+  html += '<input type="range" id="aiSettingsTemp" class="ai-temp-slider" min="0" max="1.5" step="0.1" value="' + (settings.ollama.temperature != null ? settings.ollama.temperature : selectedCard.defaultTemperature) + '" oninput="document.getElementById(\'aiTempValue\').textContent=this.value">';
+
+  // Context length selector
+  const ctxOptions = [2048, 4096, 8192, 16384, 32768, 65536, 131072];
+  const currentCtx = settings.ollama.numCtx || selectedCard.defaultNumCtx;
+  html += '<label>Context Length</label>';
+  html += '<select id="aiSettingsCtx">';
+  ctxOptions.forEach(v => {
+    if (v <= selectedCard.contextWindow) {
+      const label = v >= 1024 ? (v / 1024) + 'K' : v;
+      html += '<option value="' + v + '"' + (currentCtx === v ? ' selected' : '') + '>' + label + ' tokens</option>';
+    }
+  });
+  html += '</select>';
+
   html += '</div>';
 
   html += '<button class="ai-settings-save" onclick="saveAISettingsFromModal()">Save Settings</button>';
@@ -3653,6 +3791,37 @@ function showAISettings() {
 
   document.getElementById('modalBox').innerHTML = html;
   document.getElementById('modalOverlay').classList.add('active');
+}
+
+function onOllamaModelChange() {
+  const models = loadOllamaModels();
+  const sel = document.getElementById('aiSettingsOllamaModel').value;
+  const card = models.find(m => m.id === sel) || models[0];
+
+  // Update description
+  document.getElementById('ollamaModelDesc').textContent = card.description;
+
+  // Update thinking toggle
+  const thinkCb = document.getElementById('aiSettingsThinking');
+  const thinkStatus = document.getElementById('aiThinkingStatus');
+  thinkCb.disabled = !card.supportsThinking;
+  thinkCb.checked = card.supportsThinking;
+  thinkStatus.textContent = card.supportsThinking ? '' : '(not supported)';
+
+  // Reset temperature to model default
+  document.getElementById('aiSettingsTemp').value = card.defaultTemperature;
+  document.getElementById('aiTempValue').textContent = card.defaultTemperature;
+
+  // Update context options
+  const ctxOptions = [2048, 4096, 8192, 16384, 32768, 65536, 131072];
+  let ctxHtml = '';
+  ctxOptions.forEach(v => {
+    if (v <= card.contextWindow) {
+      const label = v >= 1024 ? (v / 1024) + 'K' : v;
+      ctxHtml += '<option value="' + v + '"' + (v === card.defaultNumCtx ? ' selected' : '') + '>' + label + ' tokens</option>';
+    }
+  });
+  document.getElementById('aiSettingsCtx').innerHTML = ctxHtml;
 }
 
 function toggleAISettingsFields() {
@@ -3671,7 +3840,10 @@ function saveAISettingsFromModal() {
     },
     ollama: {
       endpoint: document.getElementById('aiSettingsEndpoint').value.trim(),
-      model: document.getElementById('aiSettingsOllamaModel').value.trim()
+      model: document.getElementById('aiSettingsOllamaModel').value,
+      thinking: document.getElementById('aiSettingsThinking').checked,
+      temperature: parseFloat(document.getElementById('aiSettingsTemp').value),
+      numCtx: parseInt(document.getElementById('aiSettingsCtx').value)
     },
     proxyUrl: document.getElementById('aiSettingsProxy').value.trim()
   };
