@@ -847,6 +847,15 @@
     display:flex; gap:6px; padding:2px 0;
   }
   .ai-new-play-routes .route-pos { font-weight:700; color:var(--accent); min-width:18px; }
+  .ai-result-card-new { flex-wrap:wrap; }
+  .ai-new-play-diagram { width:100%; margin-top:8px; }
+  .ai-new-play-diagram .diagram-img { width:100%; }
+  .ai-add-playbook-btn {
+    width:100%; margin-top:8px; padding:10px; border-radius:8px; border:1px solid var(--accent);
+    background:transparent; color:var(--accent); font-size:13px; font-weight:700;
+    cursor:pointer; transition:all .15s;
+  }
+  .ai-add-playbook-btn:active { background:var(--accent); color:#fff; transform:scale(0.97); }
   .ai-model-desc {
     font-size:12px; color:var(--text2); margin:-6px 0 12px; padding:4px 0; line-height:1.4;
   }
@@ -3300,7 +3309,14 @@ ${mode === 'suggest' ? `MODE: You may suggest NEW play concepts not in the playb
 - A creative play name
 - Full route descriptions for each position (C, Q, W, X, Y, Z)
 - Why this new concept works against the specified defense
-Mark new plays with isNew: true.` : 'MODE: Only select plays from the existing playbook. Do NOT invent new plays.'}
+Mark new plays with isNew: true.
+
+FORMATIONS available: Spread, Trips Right, Trips Left, Bunch Right, Bunch Left, Twins, Deuce
+ROUTE PRESETS available: Slant, Out, In, Go, Post, Corner, Curl, Drag, Wheel, Flat, Screen, Block
+For the QB position, use "Slant" for designed QB runs or "Snap" for pocket passing (no route drawn).
+For the Center, almost always use "Block".
+
+You MUST include "formation" and "routePresets" for every new play.` : 'MODE: Only select plays from the existing playbook. Do NOT invent new plays.'}
 
 OUTPUT FORMAT — respond with ONLY valid JSON, no markdown fences:
 {
@@ -3324,7 +3340,9 @@ ${mode === 'suggest' ? `For new plays, use this format:
   "rationale": "Why this play works",
   "isNew": true,
   "description": "Brief play concept description",
-  "routes": {"C":"Snap and block left","Q":"Fake sweep right, throw screen left","W":"Run a go route","X":"Screen route - settle in flat","Y":"Crossing route","Z":"Clear out deep"}
+  "formation": "Spread",
+  "routePresets": {"C":"Block","Q":"Snap","W":"Go","X":"Screen","Y":"Drag","Z":"Slant"},
+  "routes": {"C":"Snap and block left","Q":"Drop back, read screen","W":"Go route","X":"Screen route - settle in flat","Y":"Crossing route","Z":"Slant across middle"}
 }` : ''}
 
 Generate a block of 3-5 plays sequenced strategically.`;
@@ -3517,6 +3535,165 @@ function setAIMode(mode) {
   else document.querySelectorAll('.ai-mode-btn')[1].classList.add('active');
 }
 
+function renderNewPlayDiagram(formation, routePresets) {
+  const W = 800, H = 640;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // 1. Field background
+  ctx.fillStyle = '#2d5a27';
+  ctx.fillRect(0, 0, W, H);
+
+  // Yard lines
+  ctx.setLineDash([8, 8]);
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+  ctx.lineWidth = 1;
+  const lineCount = 9;
+  for (let i = 1; i < lineCount; i++) {
+    const ly = (H / lineCount) * i;
+    ctx.beginPath(); ctx.moveTo(20, ly); ctx.lineTo(W - 20, ly); ctx.stroke();
+  }
+
+  // Line of scrimmage
+  ctx.setLineDash([]);
+  ctx.strokeStyle = 'rgba(255,215,0,0.5)';
+  ctx.lineWidth = 2;
+  const losY = H * 0.58;
+  ctx.beginPath(); ctx.moveTo(0, losY); ctx.lineTo(W, losY); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,215,0,0.5)';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.fillText('L.O.S.', W - 55, losY - 6);
+
+  // 2. Get formation positions
+  const formationData = FORMATIONS[formation];
+  if (!formationData) return null;
+
+  const positions = ['C', 'Q', 'W', 'X', 'Y', 'Z'];
+  const playerRadius = 11;
+  const cSide = 20;
+
+  // Build diagramData for editor compatibility
+  const diagramPlayers = {};
+  const diagramRoutes = {};
+
+  // 3. Draw routes first (under players)
+  positions.forEach(pos => {
+    const preset = routePresets[pos];
+    if (!preset || preset === 'Snap') return;
+    const routeDef = ROUTE_PRESETS[preset];
+    if (!routeDef) return;
+    const start = formationData[pos];
+    if (!start) return;
+
+    const pc = posColors[pos];
+    const color = pc ? pc.color : '#888';
+
+    // Build absolute points
+    const pts = [{ x: start.x, y: start.y }];
+    routeDef.points.forEach(p => {
+      pts.push({ x: start.x + p.dx, y: start.y + p.dy });
+    });
+
+    // Draw polyline
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    if (routeDef.type === 'dashed') {
+      ctx.setLineDash([8, 6]);
+    } else {
+      ctx.setLineDash([]);
+    }
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) {
+      ctx.lineTo(pts[i].x, pts[i].y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Arrowhead or block bar at final point
+    const last = pts[pts.length - 1];
+    const prev = pts[pts.length - 2];
+    const angle = Math.atan2(last.y - prev.y, last.x - prev.x);
+
+    if (routeDef.type === 'block') {
+      // Perpendicular bar
+      const barLen = 10;
+      const perpAngle = angle + Math.PI / 2;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(last.x + Math.cos(perpAngle) * barLen, last.y + Math.sin(perpAngle) * barLen);
+      ctx.lineTo(last.x - Math.cos(perpAngle) * barLen, last.y - Math.sin(perpAngle) * barLen);
+      ctx.stroke();
+    } else {
+      // Arrow triangle
+      const arrowLen = 10;
+      const arrowAngle = Math.PI / 6;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(last.x - arrowLen * Math.cos(angle - arrowAngle), last.y - arrowLen * Math.sin(angle - arrowAngle));
+      ctx.lineTo(last.x - arrowLen * Math.cos(angle + arrowAngle), last.y - arrowLen * Math.sin(angle + arrowAngle));
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Store for diagramData
+    diagramRoutes[pos] = {
+      points: routeDef.points.map(p => ({ dx: p.dx, dy: p.dy })),
+      type: routeDef.type,
+      label: preset
+    };
+  });
+
+  // 4. Draw players
+  positions.forEach(pos => {
+    const p = formationData[pos];
+    if (!p) return;
+    const pc = posColors[pos];
+    const color = pc ? pc.color : '#888';
+
+    if (pos === 'C') {
+      ctx.fillStyle = color;
+      ctx.fillRect(p.x - cSide / 2, p.y - cSide / 2, cSide, cSide);
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(p.x - cSide / 2, p.y - cSide / 2, cSide, cSide);
+    } else {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, playerRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // Letter label
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(pos, p.x, p.y);
+
+    // Store for diagramData
+    diagramPlayers[pos] = { x: p.x, y: p.y };
+  });
+
+  // Convert canvas to base64
+  const dataUrl = canvas.toDataURL('image/png');
+  const imageBase64 = dataUrl.replace('data:image/png;base64,', '');
+
+  const diagramData = {
+    canvasW: W,
+    canvasH: H,
+    players: diagramPlayers,
+    routes: diagramRoutes
+  };
+
+  return { imageBase64, diagramData };
+}
+
 function showAILoading() {
   const area = document.getElementById('aiResultsArea');
   if (!area) return;
@@ -3545,14 +3722,28 @@ function showAIResults(result) {
   }
 
   // Play cards
-  result.block.forEach(b => {
-    html += '<div class="ai-result-card">';
+  result.block.forEach((b, idx) => {
+    // Render diagram for new plays that have formation + routePresets
+    if (b.isNew && b.formation && b.routePresets && !b._diagramBase64) {
+      const diagResult = renderNewPlayDiagram(b.formation, b.routePresets);
+      if (diagResult) {
+        b._diagramBase64 = diagResult.imageBase64;
+        b._diagramData = diagResult.diagramData;
+      }
+    }
+
+    html += '<div class="ai-result-card' + (b.isNew ? ' ai-result-card-new' : '') + '">';
     html += '<div class="ai-result-order">' + b.order + '</div>';
     html += '<div class="ai-result-info">';
     html += '<div class="ai-result-name">' + b.playType;
     if (b.isNew) html += ' <span class="ai-new-badge">NEW</span>';
     html += '</div>';
     html += '<div class="ai-result-rationale">' + b.rationale + '</div>';
+
+    // Diagram for new plays
+    if (b.isNew && b._diagramBase64) {
+      html += '<div class="ai-new-play-diagram"><img class="diagram-img" src="data:image/png;base64,' + b._diagramBase64 + '" alt="' + b.playType + ' diagram"></div>';
+    }
 
     // Show routes for new plays
     if (b.isNew && b.routes) {
@@ -3564,6 +3755,11 @@ function showAIResults(result) {
         }
       });
       html += '</div>';
+    }
+
+    // Add to Playbook button for new plays
+    if (b.isNew) {
+      html += '<button class="ai-add-playbook-btn" onclick="addAIPlayToPlaybook(' + idx + ')">+ Add to Playbook</button>';
     }
 
     html += '</div>';
@@ -3588,6 +3784,36 @@ function showAIResults(result) {
   html += '</div>';
 
   area.innerHTML = html;
+}
+
+function addAIPlayToPlaybook(blockIndex) {
+  if (!aiCurrentResult || !aiCurrentResult.block || !aiCurrentResult.block[blockIndex]) return;
+  const b = aiCurrentResult.block[blockIndex];
+  if (!b.isNew) return;
+
+  const nextNum = plays.length > 0 ? Math.max(...plays.map(p => p.num)) + 1 : 1;
+  const playName = b.playType.replace(/^New:\s*/, '');
+  const newPlay = {
+    num: nextNum,
+    type: playName,
+    variation: b.description || '',
+    action: 'PASS',
+    customDiagram: b._diagramBase64 || null,
+    diagramData: b._diagramData ? JSON.stringify(b._diagramData) : null,
+    C: (b.routes && b.routes.C) || '',
+    Q: (b.routes && b.routes.Q) || '',
+    W: (b.routes && b.routes.W) || '',
+    X: (b.routes && b.routes.X) || '',
+    Y: (b.routes && b.routes.Y) || '',
+    Z: (b.routes && b.routes.Z) || '',
+    target: '',
+    row: 0
+  };
+
+  plays.push(newPlay);
+  if (!playTypes.includes(playName)) playTypes.push(playName);
+  savePlays();
+  showPlay(nextNum);
 }
 
 async function generatePlayBlock() {
@@ -3694,7 +3920,7 @@ function pushAIBlockToGame(gameId) {
 
   aiCurrentResult.block.forEach(b => {
     if (b.isNew) {
-      // New play — add with description
+      // New play — add with description and diagram
       game.calls.push({
         playNum: null,
         playType: b.playType,
@@ -3703,7 +3929,9 @@ function pushAIBlockToGame(gameId) {
         time: new Date().toLocaleTimeString(),
         isAISuggested: true,
         aiDescription: b.description || '',
-        aiRoutes: b.routes || {}
+        aiRoutes: b.routes || {},
+        customDiagram: b._diagramBase64 || null,
+        diagramData: b._diagramData ? JSON.stringify(b._diagramData) : null
       });
     } else {
       // Existing play
