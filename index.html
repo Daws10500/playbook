@@ -3975,6 +3975,8 @@ async function callAI(systemPrompt, userMessage) {
     }
     if (!resp.ok) {
       const errText = await resp.text().catch(() => '');
+      console.error('Ollama response status:', resp.status, 'body:', errText);
+      if (resp.status === 401 || resp.status === 403) throw new Error('Ollama API key is invalid or expired. Check your key in AI Settings.');
       throw new Error('Ollama error (' + resp.status + '): ' + (errText || 'Is Ollama running at ' + endpoint + '?'));
     }
     const data = await resp.json();
@@ -4785,6 +4787,13 @@ async function generatePlayBlock() {
   if (settings.provider === 'anthropic' && !settings.anthropic.apiKey) {
     showAIError('No API key configured. Tap the gear icon to set up your Anthropic API key.');
     return;
+  }
+  if (settings.provider === 'ollama' && !settings.ollama.apiKey) {
+    const modelId = settings.ollama.model || '';
+    if (modelId.endsWith(':cloud') || !modelId) {
+      showAIError('No Ollama API key configured. Tap the gear icon to add your Ollama cloud API key.');
+      return;
+    }
   }
 
   showAILoading();

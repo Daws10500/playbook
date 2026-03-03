@@ -34,7 +34,16 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify(ollamaBody),
       });
-      const data = await ollamaResp.json();
+      const respText = await ollamaResp.text();
+      let data;
+      try {
+        data = JSON.parse(respText);
+      } catch {
+        return new Response(
+          JSON.stringify({ error: `Ollama returned non-JSON (status ${ollamaResp.status}): ${respText.slice(0, 200)}` }),
+          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
       return new Response(JSON.stringify(data), {
         status: ollamaResp.status,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
