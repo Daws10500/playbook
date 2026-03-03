@@ -13,14 +13,42 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { provider, model, messages, system, apiKey } = await req.json();
+    const body = await req.json();
+    const { provider } = body;
+
+    if (provider === "ollama") {
+      // Proxy Ollama Cloud requests
+      const { apiKey, endpoint, ollamaBody } = body;
+      if (!apiKey) {
+        return new Response(
+          JSON.stringify({ error: "Ollama API key is required for cloud proxy" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      const ollamaEndpoint = endpoint || "https://ollama.com";
+      const ollamaResp = await fetch(`${ollamaEndpoint}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(ollamaBody),
+      });
+      const data = await ollamaResp.json();
+      return new Response(JSON.stringify(data), {
+        status: ollamaResp.status,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     if (provider !== "anthropic") {
       return new Response(
-        JSON.stringify({ error: "Only anthropic provider is supported via proxy" }),
+        JSON.stringify({ error: "Unsupported provider: " + provider }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    const { model, messages, system, apiKey } = body;
 
     if (!apiKey) {
       return new Response(
@@ -37,7 +65,7 @@ Deno.serve(async (req) => {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: model || "claude-sonnet-4-20250514",
+        model: model || "claude-sonnet-4-6",
         max_tokens: 2048,
         system: system || undefined,
         messages: messages,

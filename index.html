@@ -3385,18 +3385,38 @@ async function callAI(systemPrompt, userMessage) {
       }
     };
     if (useThinking) reqBody.think = true;
-    const ollamaHeaders = { 'Content-Type': 'application/json' };
-    if (settings.ollama.apiKey) ollamaHeaders['Authorization'] = 'Bearer ' + settings.ollama.apiKey;
-    const resp = await fetch(endpoint + '/api/chat', {
-      method: 'POST',
-      headers: ollamaHeaders,
-      body: JSON.stringify(reqBody)
-    });
+    let resp;
+    if (settings.ollama.apiKey) {
+      // Cloud mode: route through Supabase edge function proxy to avoid CORS
+      const proxyUrl = settings.proxyUrl || SUPABASE_URL + '/functions/v1/ai-proxy';
+      resp = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'ollama',
+          apiKey: settings.ollama.apiKey,
+          endpoint: endpoint,
+          ollamaBody: reqBody
+        })
+      });
+    } else {
+      // Local mode: direct call to Ollama instance
+      resp = await fetch(endpoint + '/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reqBody)
+      });
+    }
     if (!resp.ok) {
-      throw new Error('Ollama error (' + resp.status + '). Is Ollama running at ' + endpoint + '?');
+      const errText = await resp.text().catch(() => '');
+      throw new Error('Ollama error (' + resp.status + '): ' + (errText || 'Is Ollama running at ' + endpoint + '?'));
     }
     const data = await resp.json();
-    if (data.message && data.message.content) return data.message.content;
+    if (data.message) {
+      // When thinking is enabled, content may be in message.thinking (content is empty)
+      if (data.message.content) return data.message.content;
+      if (data.message.thinking) return data.message.thinking;
+    }
     throw new Error('Unexpected Ollama response format');
   } else {
     throw new Error('Unknown AI provider: ' + settings.provider);
