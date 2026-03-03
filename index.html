@@ -3952,6 +3952,8 @@ async function callAI(systemPrompt, userMessage) {
     let resp;
     if (settings.ollama.apiKey) {
       // Cloud mode: route through Supabase edge function proxy to avoid CORS
+      // Use https://ollama.com for cloud mode unless user explicitly set a different cloud endpoint
+      const cloudEndpoint = (endpoint === 'http://localhost:11434') ? 'https://ollama.com' : endpoint;
       const proxyUrl = settings.proxyUrl || SUPABASE_URL + '/functions/v1/ai-proxy';
       resp = await fetch(proxyUrl, {
         method: 'POST',
@@ -3959,7 +3961,7 @@ async function callAI(systemPrompt, userMessage) {
         body: JSON.stringify({
           provider: 'ollama',
           apiKey: settings.ollama.apiKey,
-          endpoint: endpoint,
+          endpoint: cloudEndpoint,
           ollamaBody: reqBody
         })
       });
@@ -3976,11 +3978,17 @@ async function callAI(systemPrompt, userMessage) {
       throw new Error('Ollama error (' + resp.status + '): ' + (errText || 'Is Ollama running at ' + endpoint + '?'));
     }
     const data = await resp.json();
+    if (data.error) throw new Error(data.error.message || data.error);
     if (data.message) {
-      // When thinking is enabled, content may be in message.thinking (content is empty)
-      if (data.message.content) return data.message.content;
-      if (data.message.thinking) return data.message.thinking;
+      // When thinking is enabled, actual content may be empty string while thinking has reasoning
+      // Prefer content if it has substance; fall back to thinking only if content is truly empty
+      if (data.message.content && data.message.content.trim()) return data.message.content;
+      if (data.message.thinking && data.message.thinking.trim()) {
+        // Thinking output is reasoning, not JSON — try to extract JSON from it
+        return data.message.thinking;
+      }
     }
+    console.error('Unexpected Ollama response:', data);
     throw new Error('Unexpected Ollama response format');
   } else {
     throw new Error('Unknown AI provider: ' + settings.provider);
@@ -4785,12 +4793,28 @@ async function generatePlayBlock() {
     const { systemPrompt, userMessage } = buildAIPrompt(defense, aiMode, gameId);
     const raw = await callAI(systemPrompt, userMessage);
 
-    // Parse JSON — strip markdown fences if present
+    // Parse JSON — strip markdown fences and surrounding text if present
     let cleaned = raw.trim();
     if (cleaned.startsWith('```')) {
       cleaned = cleaned.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
     }
-    const parsed = JSON.parse(cleaned);
+    // If model wrapped JSON in prose, extract the first { ... } or [ ... ] block
+    if (cleaned.length > 0 && cleaned[0] !== '{' && cleaned[0] !== '[') {
+      const jsonStart = cleaned.search(/[\[{]/);
+      if (jsonStart !== -1) {
+        const lastBrace = cleaned.lastIndexOf('}');
+        const lastBracket = cleaned.lastIndexOf(']');
+        const jsonEnd = Math.max(lastBrace, lastBracket);
+        if (jsonEnd > jsonStart) cleaned = cleaned.slice(jsonStart, jsonEnd + 1);
+      }
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch(parseErr) {
+      console.error('Raw AI response:', raw);
+      throw new SyntaxError('Invalid JSON from AI model');
+    }
 
     // Validate play references
     if (parsed.block && Array.isArray(parsed.block)) {
