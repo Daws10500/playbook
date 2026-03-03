@@ -766,6 +766,12 @@
   .ai-form-group select:focus, .ai-form-group input:focus {
     outline:none; border-color:var(--accent);
   }
+  .defense-diagram-wrap {
+    padding:8px 16px 4px; text-align:center;
+  }
+  .defense-diagram-wrap canvas {
+    border-radius:10px; width:100%; max-width:280px;
+  }
   .ai-mode-toggle {
     display:flex; gap:4px; padding:0 16px 12px;
   }
@@ -3203,7 +3209,297 @@ function assignPlayer(playNum, pos, playerName) {
 }
 
 // ============= AI PLAY GENERATOR =============
-const DEFENSE_TYPES = ['Cover 1','Cover 2','Cover 3','Cover 4','Man-to-Man','Zone Blitz','Prevent','2-Man Under','Cover 6'];
+const DEFENSE_CATEGORIES = {
+  'Zone Coverages': ['Cover 2','Cover 3','Cover 4 (Quarters)','Cover 6','Tampa 2'],
+  'Man Coverages': ['Cover 0 (No Safety)','Cover 1','Cover 5 (2-Man)','Man-to-Man'],
+  'Blitz / Hybrid / Special': ['Zone Blitz','Man Blitz','Prevent','Spy / Contain']
+};
+const ALL_DEFENSE_TYPES = Object.values(DEFENSE_CATEGORIES).flat();
+const DEFENSE_LEGACY_MAP = { 'Cover 4':'Cover 4 (Quarters)', '2-Man Under':'Cover 5 (2-Man)' };
+
+const DEFENSE_DIAGRAMS = {
+  'Cover 0 (No Safety)': {
+    defenders: [
+      {x:0.12,y:0.30,label:'CB',type:'cb'},{x:0.88,y:0.30,label:'CB',type:'cb'},
+      {x:0.35,y:0.35,label:'LB',type:'lb'},{x:0.65,y:0.35,label:'LB',type:'lb'},
+      {x:0.50,y:0.25,label:'S',type:'s'}
+    ],
+    zones:[],
+    manLines:[
+      {fx:0.12,fy:0.30,tx:0.08,ty:0.52},{fx:0.88,fy:0.30,tx:0.92,ty:0.52},
+      {fx:0.35,fy:0.35,tx:0.30,ty:0.52},{fx:0.65,fy:0.35,tx:0.70,ty:0.52},
+      {fx:0.50,fy:0.25,tx:0.50,ty:0.52}
+    ],
+    rush:[{x:0.50,y:0.48}]
+  },
+  'Cover 1': {
+    defenders: [
+      {x:0.12,y:0.30,label:'CB',type:'cb'},{x:0.88,y:0.30,label:'CB',type:'cb'},
+      {x:0.35,y:0.35,label:'LB',type:'lb'},{x:0.65,y:0.35,label:'LB',type:'lb'},
+      {x:0.50,y:0.12,label:'FS',type:'s'}
+    ],
+    zones:[{x:0.25,y:0.02,w:0.50,h:0.18,color:'deep'}],
+    manLines:[
+      {fx:0.12,fy:0.30,tx:0.08,ty:0.52},{fx:0.88,fy:0.30,tx:0.92,ty:0.52},
+      {fx:0.35,fy:0.35,tx:0.30,ty:0.52},{fx:0.65,fy:0.35,tx:0.70,ty:0.52}
+    ],
+    rush:[{x:0.50,y:0.48}]
+  },
+  'Cover 2': {
+    defenders: [
+      {x:0.12,y:0.32,label:'CB',type:'cb'},{x:0.88,y:0.32,label:'CB',type:'cb'},
+      {x:0.30,y:0.10,label:'SS',type:'s'},{x:0.70,y:0.10,label:'FS',type:'s'},
+      {x:0.50,y:0.38,label:'LB',type:'lb'}
+    ],
+    zones:[
+      {x:0.02,y:0.02,w:0.46,h:0.22,color:'deep'},{x:0.52,y:0.02,w:0.46,h:0.22,color:'deep'},
+      {x:0.02,y:0.26,w:0.20,h:0.20,color:'flat'},{x:0.78,y:0.26,w:0.20,h:0.20,color:'flat'}
+    ],
+    manLines:[],
+    rush:[{x:0.50,y:0.48}]
+  },
+  'Cover 3': {
+    defenders: [
+      {x:0.12,y:0.30,label:'CB',type:'cb'},{x:0.88,y:0.30,label:'CB',type:'cb'},
+      {x:0.50,y:0.10,label:'FS',type:'s'},
+      {x:0.35,y:0.38,label:'LB',type:'lb'},{x:0.65,y:0.38,label:'LB',type:'lb'}
+    ],
+    zones:[
+      {x:0.02,y:0.02,w:0.30,h:0.30,color:'deep'},
+      {x:0.35,y:0.02,w:0.30,h:0.30,color:'deep'},
+      {x:0.68,y:0.02,w:0.30,h:0.30,color:'deep'}
+    ],
+    manLines:[],
+    rush:[{x:0.50,y:0.48}]
+  },
+  'Cover 4 (Quarters)': {
+    defenders: [
+      {x:0.12,y:0.15,label:'CB',type:'cb'},{x:0.88,y:0.15,label:'CB',type:'cb'},
+      {x:0.35,y:0.12,label:'SS',type:'s'},{x:0.65,y:0.12,label:'FS',type:'s'},
+      {x:0.50,y:0.38,label:'LB',type:'lb'}
+    ],
+    zones:[
+      {x:0.02,y:0.02,w:0.23,h:0.28,color:'deep'},{x:0.26,y:0.02,w:0.23,h:0.28,color:'deep'},
+      {x:0.51,y:0.02,w:0.23,h:0.28,color:'deep'},{x:0.75,y:0.02,w:0.23,h:0.28,color:'deep'}
+    ],
+    manLines:[],
+    rush:[{x:0.50,y:0.48}]
+  },
+  'Cover 5 (2-Man)': {
+    defenders: [
+      {x:0.12,y:0.30,label:'CB',type:'cb'},{x:0.88,y:0.30,label:'CB',type:'cb'},
+      {x:0.30,y:0.10,label:'SS',type:'s'},{x:0.70,y:0.10,label:'FS',type:'s'},
+      {x:0.50,y:0.35,label:'LB',type:'lb'}
+    ],
+    zones:[
+      {x:0.02,y:0.02,w:0.46,h:0.22,color:'deep'},{x:0.52,y:0.02,w:0.46,h:0.22,color:'deep'}
+    ],
+    manLines:[
+      {fx:0.12,fy:0.30,tx:0.08,ty:0.52},{fx:0.88,fy:0.30,tx:0.92,ty:0.52},
+      {fx:0.50,fy:0.35,tx:0.50,ty:0.52}
+    ],
+    rush:[{x:0.50,y:0.48}]
+  },
+  'Cover 6': {
+    defenders: [
+      {x:0.12,y:0.15,label:'CB',type:'cb'},{x:0.88,y:0.25,label:'CB',type:'cb'},
+      {x:0.30,y:0.12,label:'SS',type:'s'},{x:0.70,y:0.10,label:'FS',type:'s'},
+      {x:0.50,y:0.38,label:'LB',type:'lb'}
+    ],
+    zones:[
+      {x:0.02,y:0.02,w:0.23,h:0.28,color:'deep'},{x:0.26,y:0.02,w:0.23,h:0.28,color:'deep'},
+      {x:0.52,y:0.02,w:0.46,h:0.22,color:'deep'},
+      {x:0.78,y:0.26,w:0.20,h:0.20,color:'flat'}
+    ],
+    manLines:[],
+    rush:[{x:0.50,y:0.48}]
+  },
+  'Tampa 2': {
+    defenders: [
+      {x:0.12,y:0.32,label:'CB',type:'cb'},{x:0.88,y:0.32,label:'CB',type:'cb'},
+      {x:0.30,y:0.10,label:'SS',type:'s'},{x:0.70,y:0.10,label:'FS',type:'s'},
+      {x:0.50,y:0.18,label:'LB',type:'lb'}
+    ],
+    zones:[
+      {x:0.02,y:0.02,w:0.46,h:0.18,color:'deep'},{x:0.52,y:0.02,w:0.46,h:0.18,color:'deep'},
+      {x:0.35,y:0.08,w:0.30,h:0.18,color:'mid'},
+      {x:0.02,y:0.26,w:0.20,h:0.20,color:'flat'},{x:0.78,y:0.26,w:0.20,h:0.20,color:'flat'}
+    ],
+    manLines:[],
+    rush:[{x:0.50,y:0.48}]
+  },
+  'Man-to-Man': {
+    defenders: [
+      {x:0.12,y:0.30,label:'CB',type:'cb'},{x:0.88,y:0.30,label:'CB',type:'cb'},
+      {x:0.35,y:0.32,label:'LB',type:'lb'},{x:0.65,y:0.32,label:'LB',type:'lb'},
+      {x:0.50,y:0.15,label:'FS',type:'s'}
+    ],
+    zones:[],
+    manLines:[
+      {fx:0.12,fy:0.30,tx:0.08,ty:0.52},{fx:0.88,fy:0.30,tx:0.92,ty:0.52},
+      {fx:0.35,fy:0.32,tx:0.30,ty:0.52},{fx:0.65,fy:0.32,tx:0.70,ty:0.52},
+      {fx:0.50,fy:0.15,tx:0.50,ty:0.52}
+    ],
+    rush:[{x:0.50,y:0.48}]
+  },
+  'Zone Blitz': {
+    defenders: [
+      {x:0.15,y:0.25,label:'CB',type:'cb'},{x:0.85,y:0.25,label:'CB',type:'cb'},
+      {x:0.50,y:0.12,label:'FS',type:'s'},
+      {x:0.35,y:0.38,label:'LB',type:'lb'},{x:0.65,y:0.38,label:'LB',type:'lb'}
+    ],
+    zones:[
+      {x:0.02,y:0.02,w:0.30,h:0.30,color:'deep'},
+      {x:0.35,y:0.02,w:0.30,h:0.30,color:'deep'},
+      {x:0.68,y:0.02,w:0.30,h:0.30,color:'deep'}
+    ],
+    manLines:[],
+    rush:[{x:0.38,y:0.48},{x:0.62,y:0.48}]
+  },
+  'Man Blitz': {
+    defenders: [
+      {x:0.12,y:0.30,label:'CB',type:'cb'},{x:0.88,y:0.30,label:'CB',type:'cb'},
+      {x:0.35,y:0.32,label:'LB',type:'lb'},{x:0.65,y:0.32,label:'LB',type:'lb'},
+      {x:0.50,y:0.15,label:'S',type:'s'}
+    ],
+    zones:[],
+    manLines:[
+      {fx:0.12,fy:0.30,tx:0.08,ty:0.52},{fx:0.88,fy:0.30,tx:0.92,ty:0.52},
+      {fx:0.50,fy:0.15,tx:0.50,ty:0.52},{fx:0.65,fy:0.32,tx:0.70,ty:0.52}
+    ],
+    rush:[{x:0.35,y:0.48},{x:0.65,y:0.42}]
+  },
+  'Prevent': {
+    defenders: [
+      {x:0.10,y:0.10,label:'CB',type:'cb'},{x:0.90,y:0.10,label:'CB',type:'cb'},
+      {x:0.35,y:0.08,label:'SS',type:'s'},{x:0.65,y:0.08,label:'FS',type:'s'},
+      {x:0.50,y:0.38,label:'LB',type:'lb'}
+    ],
+    zones:[
+      {x:0.02,y:0.02,w:0.23,h:0.25,color:'deep'},{x:0.26,y:0.02,w:0.23,h:0.25,color:'deep'},
+      {x:0.51,y:0.02,w:0.23,h:0.25,color:'deep'},{x:0.75,y:0.02,w:0.23,h:0.25,color:'deep'}
+    ],
+    manLines:[],
+    rush:[{x:0.50,y:0.48}]
+  },
+  'Spy / Contain': {
+    defenders: [
+      {x:0.15,y:0.25,label:'CB',type:'cb'},{x:0.85,y:0.25,label:'CB',type:'cb'},
+      {x:0.30,y:0.10,label:'SS',type:'s'},{x:0.70,y:0.10,label:'FS',type:'s'},
+      {x:0.50,y:0.38,label:'LB',type:'lb'}
+    ],
+    zones:[
+      {x:0.02,y:0.02,w:0.46,h:0.20,color:'deep'},{x:0.52,y:0.02,w:0.46,h:0.20,color:'deep'},
+      {x:0.15,y:0.25,w:0.28,h:0.18,color:'under'},{x:0.57,y:0.25,w:0.28,h:0.18,color:'under'}
+    ],
+    manLines:[{fx:0.50,fy:0.38,tx:0.50,ty:0.52}],
+    rush:[{x:0.50,y:0.48}]
+  }
+};
+
+const DEF_ZONE_COLORS = {
+  deep:'rgba(100,150,255,0.18)', flat:'rgba(255,200,60,0.18)',
+  under:'rgba(255,120,80,0.18)', mid:'rgba(180,120,255,0.20)'
+};
+const DEF_TYPE_COLORS = {cb:'#4488ff',s:'#ffcc00',lb:'#ff6644',r:'#ffffff'};
+
+function renderDefenseDiagram(name) {
+  const cvs = document.getElementById('defenseDiagramCanvas');
+  if (!cvs) return;
+  const ctx = cvs.getContext('2d');
+  const W = cvs.width, H = cvs.height;
+  const d = DEFENSE_DIAGRAMS[name];
+  if (!d) return;
+
+  // Field background
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#145214'); g.addColorStop(0.3,'#1a6b1a');
+  g.addColorStop(0.5,'#1e7a1e'); g.addColorStop(0.7,'#1a6b1a');
+  g.addColorStop(1,'#145214');
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+
+  // Yard lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1;
+  ctx.setLineDash([4,4]);
+  [0.25,0.45,0.70].forEach(yy => {
+    ctx.beginPath(); ctx.moveTo(10,H*yy); ctx.lineTo(W-10,H*yy); ctx.stroke();
+  });
+  ctx.setLineDash([]);
+
+  // LOS
+  ctx.strokeStyle = 'rgba(218,165,32,0.6)'; ctx.lineWidth = 1.5;
+  ctx.setLineDash([6,4]);
+  const losY = H * 0.55;
+  ctx.beginPath(); ctx.moveTo(10,losY); ctx.lineTo(W-10,losY); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Offense dots
+  ctx.fillStyle = 'rgba(180,180,180,0.45)';
+  [{x:0.50,y:0.60},{x:0.30,y:0.60},{x:0.70,y:0.60},{x:0.08,y:0.58},{x:0.92,y:0.58}].forEach(o => {
+    ctx.beginPath(); ctx.arc(W*o.x,H*o.y,4,0,Math.PI*2); ctx.fill();
+  });
+
+  // Zone shapes
+  d.zones.forEach(z => {
+    const zx=W*z.x, zy=H*z.y, zw=W*z.w, zh=H*z.h, r=6;
+    ctx.fillStyle = DEF_ZONE_COLORS[z.color] || DEF_ZONE_COLORS.deep;
+    ctx.beginPath();
+    ctx.moveTo(zx+r,zy); ctx.lineTo(zx+zw-r,zy); ctx.quadraticCurveTo(zx+zw,zy,zx+zw,zy+r);
+    ctx.lineTo(zx+zw,zy+zh-r); ctx.quadraticCurveTo(zx+zw,zy+zh,zx+zw-r,zy+zh);
+    ctx.lineTo(zx+r,zy+zh); ctx.quadraticCurveTo(zx,zy+zh,zx,zy+zh-r);
+    ctx.lineTo(zx,zy+r); ctx.quadraticCurveTo(zx,zy,zx+r,zy);
+    ctx.closePath(); ctx.fill();
+  });
+
+  // Man-assignment lines
+  if (d.manLines.length) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1.2;
+    ctx.setLineDash([4,3]);
+    d.manLines.forEach(m => {
+      ctx.beginPath(); ctx.moveTo(W*m.fx,H*m.fy); ctx.lineTo(W*m.tx,H*m.ty); ctx.stroke();
+    });
+    ctx.setLineDash([]);
+  }
+
+  // Rush arrows
+  d.rush.forEach(r => {
+    const rx=W*r.x, ry=H*r.y, tip=losY-2;
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(rx,ry); ctx.lineTo(rx,tip); ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.moveTo(rx,tip-2); ctx.lineTo(rx-4,tip+5); ctx.lineTo(rx+4,tip+5); ctx.closePath(); ctx.fill();
+  });
+
+  // Defender circles
+  d.defenders.forEach(df => {
+    const dx=W*df.x, dy=H*df.y;
+    ctx.fillStyle = DEF_TYPE_COLORS[df.type] || '#ffffff';
+    ctx.beginPath(); ctx.arc(dx,dy,12,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(dx,dy,12,0,Math.PI*2); ctx.stroke();
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 9px system-ui';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(df.label,dx,dy);
+  });
+
+  // Coverage label
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(W*0.15, H-20, W*0.70, 16);
+  ctx.fillStyle = '#ffffff'; ctx.font = 'bold 10px system-ui';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(name, W/2, H-12);
+}
+
+function updateDefenseDiagram() {
+  const sel = document.getElementById('aiDefenseSelect');
+  const wrap = document.getElementById('defenseDiagramWrap');
+  if (!sel || !wrap) return;
+  const val = sel.value;
+  if (!val || !DEFENSE_DIAGRAMS[val]) { wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  renderDefenseDiagram(val);
+}
+
 const ANTHROPIC_MODELS = [
   {id:'claude-sonnet-4-6', name:'Claude Sonnet 4.6'},
   {id:'claude-haiku-4-5-20251001', name:'Claude Haiku 4.5'}
@@ -3353,30 +3649,184 @@ function buildAIPrompt(defense, mode, gameId) {
     }
   }
 
-  const systemPrompt = `You are an expert youth flag football offensive coordinator. You analyze defensive schemes and create strategic play sequences.
+  const systemPrompt = `You are an expert youth flag football offensive coordinator for Under the Lights 6v6 (1st–2nd grade, no-rush division). You analyze defensive schemes and create strategic play sequences that are LEGAL under these rules.
 
-RULES:
-- 6-player flag football: Center (C), Quarterback (Q), W, X, Y, Z receivers/runners
-- No blocking allowed — all plays are passing or designed QB runs/handoffs
+LEAGUE RULES — Under the Lights 6v6 (Grades 1–2, No-Rush):
+
+GAME FORMAT:
+- 6v6 coed flag football, pee-wee ball
 - Flag pull = tackle
+- No defensive pass rush allowed; league uses a verbal sack count (up to 6 seconds). If count expires before pass or handoff, result is a sack at QB spot.
+
+PERSONNEL & ALIGNMENT:
+- Offense: 6 players — 1 QB (Q), 1 Center (C), 4 eligible receivers/runners (W, X, Y, Z)
+- All 6 offensive players are eligible receivers (including C after snap release)
+- Required: exactly 1 center on ball + at least 1 additional player on LOS (minimum 2 on LOS)
+- Illegal formation (wrong number on LOS, everyone in backfield): 5 yards, replay down
+
+MOTION RULES:
+- Maximum 1 player in motion at snap
+- Motion must be parallel or backward, NOT toward the LOS
+- Illegal motion: 5 yards, replay down
+
+SNAP & PASS TIMING:
+- Ball must be snapped from center to QB; QB must be first to possess the snap
+- Max QB hold time: ~6 seconds (sack count)
+- Exactly 1 forward pass allowed per play, must be thrown before crossing LOS
+- Illegal forward pass: 5 yards, loss of down
+
+RUN vs PASS CONSTRAINTS (CRITICAL — MUST FOLLOW):
+- QB CANNOT RUN past the line of scrimmage. Any designed QB run is ILLEGAL.
+- No defensive rushing allowed; any defender crossing LOS to attack QB is illegal rushing (5 yards, replay down)
+- Handoffs and pitches behind LOS to a non-QB runner ARE allowed; runner may then cross LOS
+- Reverses and end-arounds via backward/parallel handoffs/pitches are allowed
+- Lateral passes (backward/parallel) are allowed at any time
+- Illegal run: 5 yards, loss of down
+
+BLOCKING & CONTACT (STRICTLY PROHIBITED):
+- No blocking of any kind — no physical blocking, no screening
+- No flag guarding or stiff-arming
+- No leaping to avoid a flag pull
+- Blocking penalty: ball at spot of foul, loss of down
+- Flag guarding / stiff arm: 5 yards from spot, loss of down
+
+DECEPTION / TRICK PLAY LIMITS:
+- No fake substitutions or hidden-ball plays
+- Snap must go directly to QB behind center
+- No plays where multiple players simulate being QB
+- ALLOWED: pump fakes, play-action looks (without illegal handoff), motion, bunch/crunch sets if formation is legal
+
+KEY PENALTIES TO AVOID IN PLAY DESIGN:
+- Illegal formation: 5 yards, replay down
+- Illegal motion: 5 yards, replay down
+- Illegal run (QB run, run after illegal forward pass): 5 yards, loss of down
+- Illegal forward pass: 5 yards, loss of down
+- Blocking/screening: ball at spot, loss of down
+- False start: 5 yards, replay down
+- Offensive pass interference: 10 yards, replay down
+- Delay of game: 5 yards
+
+PLAY DEAD CONDITIONS:
+- Flag pulled, out of bounds, knee/body (other than hand/foot) on ground
+- Inadvertent tackle: 5 yards from end of play, replay down
+- Inadvertent tackle from behind with clear path to end zone: automatic touchdown
+
+PLAY DESIGN CONSTRAINTS SUMMARY:
+- qb_can_run_past_los: false
+- all_players_eligible: true
+- blocking_allowed: false
+- screening_allowed: false
+- max_forward_passes_per_play: 1
+- handoffs_behind_los: allowed
+- laterals: allowed
+- max_motion_at_snap: 1
+- motion_toward_los: not allowed
+- no_defensive_rush: true
+- snap_must_go_to_qb: true
 
 DEFENSE COVERAGE KNOWLEDGE:
-- Cover 1: Single high safety, man coverage underneath. Vulnerable to crossing routes, pick plays, deep posts.
+
+Zone Coverages:
 - Cover 2: Two deep safeties, corners play flats. Vulnerable to deep middle seams, corner routes, skinny posts.
 - Cover 3: Three deep zones, four underneath. Vulnerable to flat routes, curl/comeback routes, seam routes between zones.
-- Cover 4: Four deep zones. Vulnerable to underneath crossing routes, short curls, designed runs.
-- Man-to-Man: Each defender assigned a receiver. Vulnerable to picks/rubs, speed mismatches, misdirection.
-- Zone Blitz: Zone coverage with extra rushers. Vulnerable to hot routes, quick slants, screens to vacated areas.
-- Prevent: Deep zones, soft coverage. Vulnerable to short/intermediate routes, designed runs, RAC plays.
-- 2-Man Under: Two deep safeties with man-to-man under. Vulnerable to rub routes, out-breaking routes, levels concepts.
+- Cover 4 (Quarters): Four deep zones (quarter-quarter-quarter-quarter). Vulnerable to underneath crossing routes, short curls, designed runs.
 - Cover 6: Cover 4 on one side, Cover 2 on other. Vulnerable to attacking the Cover 2 side deep, four verticals.
+- Tampa 2: Cover 2 shell with MLB dropping deep into middle zone. Vulnerable to seams splitting the MLB, deep corners, quick flat routes.
+
+Man Coverages:
+- Cover 0 (No Safety): Pure man coverage, no safety help. All defenders locked on receivers. Vulnerable to deep shots, go routes, quick releases, any blown coverage is a touchdown.
+- Cover 1: Single high safety, man coverage underneath. Vulnerable to crossing routes, pick plays, deep posts.
+- Cover 5 (2-Man): Two deep safeties with man-to-man underneath. Vulnerable to rub/pick routes, out-breaking routes, levels concepts, drags.
+- Man-to-Man: Each defender assigned a receiver. Vulnerable to picks/rubs, speed mismatches, misdirection.
+
+Blitz / Hybrid / Special:
+- Zone Blitz: Zone coverage with extra rushers. Vulnerable to hot routes, quick slants, screens to vacated areas.
+- Man Blitz: Man coverage with extra rushers, no safety help. Vulnerable to quick slants, hitches, pick plays, isolation routes against overmatched defenders.
+- Prevent: Deep zones, soft coverage. Vulnerable to short/intermediate routes, designed runs, RAC plays.
+- Spy / Contain: One defender mirrors the QB to prevent scrambles. Vulnerable to passing to the spy's vacated zone, flood concepts, quick hitter routes.
+
+LEGAL DECEPTION DIMENSIONS:
+Deception must come from alignment, motion, routes, and ball fakes — never from contact, hidden ball, or fake substitutions.
+
+1. Alignment-Based Deception:
+- Unbalanced formations: Overload 3 receivers to one side (trips) to draw defenders; primary route on backside.
+- Bunch/Stack: Group 2-3 receivers close to create natural traffic (no contact) and force assignment confusion.
+- Wide splits: Isolate a single receiver very wide for easy quick throws against a single defender.
+- Compressed sets: Align receivers close to ball, then send to multiple depths/directions to confuse zone coverage.
+
+2. Motion-Based Deception (max 1 player, parallel/backward only):
+- Jet motion: WR runs across formation behind QB for real or fake handoff — trains defense to chase motion.
+- Orbit motion: WR motions behind QB and circles back toward flat, stressing outside defender.
+- In-out motion: WR starts wide and motions in tight (or vice versa) to change formation strength and assignments.
+
+3. Ball-Handling Deception (all behind LOS):
+- Fake handoff: QB extends ball toward RB, pulls it back, then throws.
+- Double fake: Fake jet sweep to one back, then handoff to a different back.
+- Fake pitch: QB fakes pitch to one side, then throws or pitches to other side.
+- Pump fake: QB gives quick fake throw to draw defenders up, then throws elsewhere.
+- CRITICAL: After a lateral to a non-QB behind LOS, that player may throw the single forward pass (halfback pass / double-pass).
+
+4. Route-Based Deception:
+- Clear-out routes: One receiver goes deep to pull defender away; another runs short route into vacated space.
+- Crossing routes (non-contact): Two receivers cross paths at different depths to create confusion.
+- Hi-low: One receiver short, another deeper in same vertical lane — forces one defender to choose.
+- Double-move light: Simple out-and-up or slant-and-go (age-appropriate small cuts).
+
+LATERAL & BACKWARD PASS CONCEPTS:
+Pre-forward-pass: Any number of backward/parallel pitches between players behind LOS are allowed.
+Post-forward-pass: Receiver may lateral backward again but may NOT throw another forward pass.
+
+Age-Appropriate Lateral Plays:
+- RB Sweep Pitch: QB pitches backward to RB moving laterally; RB runs or throws a short forward pass.
+- Pitch-Pass (Halfback Pass): QB pitches backward to RB behind LOS; RB throws forward to receiver.
+- Quick Lateral Screen: QB throws short backward pass to WR near sideline; WR runs or throws forward.
+- Double-Lateral Run: QB pitches to WR1, WR1 laterals to WR2 opposite direction; WR2 runs (no forward pass).
+- Double-Pass: QB throws backward to wide WR behind LOS; WR throws the only forward pass to another receiver.
+- Jet-Sweep Pass: Motion WR takes backward handoff/pitch, continues wide, then throws forward.
+- Throwback: WR or RB with ball throws forward across field to backside receiver.
+
+Lateral constraints: max 2 laterals per play; keep lateral distances short (few yards); geometry must be clearly backward/parallel.
+
+PLAY SEQUENCING CONCEPTS:
+Call plays in families of 2-4 plays that look similar but break differently. Earlier plays "set up" later plays by training defensive expectations.
+
+Jet Series (same motion look, different outcomes):
+- Play 1 (Base): Jet Sweep — jet motion WR takes handoff/pitch, runs to motion side. Trains defense to chase jet.
+- Play 2 (Counter): Jet Fake Quick Out — same motion/fake, QB throws quick out to backside WR. Exploits over-pursuit.
+- Play 3 (Trick): Jet Double-Pass — backward toss to motion WR who stops and throws forward to deep receiver. Punishes over-rotation.
+
+Trips Flood Series (same formation, different reads):
+- Play 1 (Base): Flood Right — outside WR go, middle WR corner, inside WR short out. Hi-low read.
+- Play 2 (Counter): Flood with RB Swing — inside WR drags left, RB swings right into flat instead. Same look, different flat player.
+- Play 3 (Trick): Flood Throwback — show flood right, then throw back across field to backside WR on delayed slant/post.
+
+Center Release Series (center becomes surprise weapon):
+- Play 1 (Base): Center Pop — center releases vertical seam 5-7 yds, WRs run clear-out go routes, QB quick throw to center.
+- Play 2 (Counter): Center Wheel — center releases short then wheels toward sideline; outside WR slants in to draw defender.
+- Play 3 (Counter): Center Delay — center holds 1-count then releases to flat; two receivers cross shallow opposite direction.
+
+STRATEGIC PRINCIPLES FOR 1-2 GRADE:
+1. Keep reads simple: Prefer 1-2 primary reads per play. Use pre-snap landmarks ("if defender backs up, throw short; if shallow, throw deep").
+2. Attack grass, not just matchups: Identify open zones (flats, middle short, deep outside). Use clear-outs to vacate a zone, then send another receiver into that space.
+3. Use misdirection to move ONE defender: At this age, defenses often play "best kid on ball." Use jet motion or a vertical clear-out to pull that key defender, then attack where they left.
+4. Design first read as a short, safe throw (slant, out, hitch) with a deeper option if coverage is soft.
+
+AGE-APPROPRIATE DESIGN CONSTRAINTS:
+- Route depth: Most routes 3-8 yards (scale to arm strength)
+- QB decision branches: 1-2 reads maximum
+- Laterals: 0-2 per play
+- Emphasize: jet motion, clear-outs, shallow crosses, basic pitch-pass or double-pass with short throws
+- Avoid: multi-layer full-field progressions, long-developing trick plays exceeding 6-second timing window, schemes relying on physical picks or confusing substitutions
 
 SEQUENCING STRATEGY:
-1. First 1-2 plays should establish a tendency or test the defense
-2. Middle plays should set up the later plays (e.g., run to set up play-action concept)
-3. Final plays should exploit what the sequence has established
-4. Vary play types (mix passes and runs) to be unpredictable
+1. First 1-2 plays should establish a tendency or test the defense (use "base" plays from a series)
+2. Middle plays should set up the later plays (e.g., handoff run to set up play-action pass concept)
+3. Final plays should exploit what the sequence has established (use "counter" or "trick" variants)
+4. Vary play types — mix passes with handoff runs to be unpredictable (remember: QB cannot run, only hand off)
 5. Consider down-and-distance scenarios
+6. With no defensive rush and a 6-second count, receivers have time for intermediate/deep routes
+7. When suggesting new plays, consider building series families (base → counter → trick) that share the same formation/motion look
+8. All plays MUST comply with Under the Lights 1st-2nd grade no-rush rules — never design plays requiring blocking, QB runs, multiple forward passes, or contact picks
 
 ${mode === 'suggest' ? `MODE: You may suggest NEW play concepts not in the playbook. For new plays, provide:
 - A creative play name
@@ -3386,7 +3836,7 @@ Mark new plays with isNew: true.
 
 FORMATIONS available: Spread, Trips Right, Trips Left, Bunch Right, Bunch Left, Twins, Deuce
 ROUTE PRESETS available: Slant, Out, In, Go, Post, Corner, Curl, Drag, Wheel, Flat, Screen, Block
-For the QB position, use "Slant" for designed QB runs or "Snap" for pocket passing (no route drawn).
+For the QB position, always use "Snap" for pocket passing (no route drawn). QB CANNOT run past the LOS — never design QB run plays.
 For the Center, almost always use "Block".
 
 You MUST include "formation" and "routePresets" for every new play.` : 'MODE: Only select plays from the existing playbook. Do NOT invent new plays.'}
@@ -3530,7 +3980,7 @@ function renderAI() {
       history.forEach((h, i) => {
         const playNames = h.block.map(b => b.playType).join(', ');
         html += '<div class="ai-history-item" onclick="showAIHistoryResult(' + i + ')">';
-        html += '<div class="ai-history-defense">vs ' + h.defense + '</div>';
+        html += '<div class="ai-history-defense">vs ' + (DEFENSE_LEGACY_MAP[h.defense] || h.defense) + '</div>';
         html += '<div class="ai-history-meta">' + h.mode + ' mode &middot; ' + h.block.length + ' plays</div>';
         html += '<div class="ai-history-plays">' + playNames + '</div></div>';
       });
@@ -3558,10 +4008,17 @@ function renderAI() {
 
   // Defense selector
   html += '<div class="ai-form-group"><label>Opposing Defense</label>';
-  html += '<select id="aiDefenseSelect">';
+  html += '<select id="aiDefenseSelect" onchange="updateDefenseDiagram()">';
   html += '<option value="">-- Select Defense --</option>';
-  DEFENSE_TYPES.forEach(d => { html += '<option value="' + d + '">' + d + '</option>'; });
+  Object.entries(DEFENSE_CATEGORIES).forEach(([cat, defs]) => {
+    html += '<optgroup label="' + cat + '">';
+    defs.forEach(d => { html += '<option value="' + d + '">' + d + '</option>'; });
+    html += '</optgroup>';
+  });
   html += '</select></div>';
+  html += '<div class="defense-diagram-wrap" id="defenseDiagramWrap" style="display:none">';
+  html += '<canvas id="defenseDiagramCanvas" width="280" height="180"></canvas>';
+  html += '</div>';
 
   // Mode toggle
   html += '<div class="ai-mode-toggle">';
@@ -3592,7 +4049,7 @@ function renderAI() {
     history.forEach((h, i) => {
       const playNames = h.block.map(b => b.playType).join(', ');
       html += '<div class="ai-history-item" onclick="showAIHistoryResult(' + i + ')">';
-      html += '<div class="ai-history-defense">vs ' + h.defense + '</div>';
+      html += '<div class="ai-history-defense">vs ' + (DEFENSE_LEGACY_MAP[h.defense] || h.defense) + '</div>';
       html += '<div class="ai-history-meta">' + h.mode + ' mode &middot; ' + h.block.length + ' plays</div>';
       html += '<div class="ai-history-plays">' + playNames + '</div></div>';
     });
