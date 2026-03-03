@@ -911,6 +911,10 @@
   .ai-result-card-new { flex-wrap:wrap; }
   .ai-new-play-diagram { width:100%; margin-top:8px; }
   .ai-new-play-diagram .diagram-img { width:100%; }
+  .play-route-desc { margin:8px 16px 0; padding:10px 12px; background:var(--surface2); border-radius:8px; }
+  .play-route-desc .route-desc-header { font-size:11px; font-weight:700; color:var(--text2); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px; }
+  .play-route-desc .route-item { display:flex; gap:6px; padding:2px 0; font-size:13px; color:var(--text2); }
+  .play-route-desc .route-pos { font-weight:700; min-width:18px; }
   .ai-add-playbook-btn {
     width:100%; margin-top:8px; padding:10px; border-radius:8px; border:1px solid var(--accent);
     background:transparent; color:var(--accent); font-size:13px; font-weight:700;
@@ -977,6 +981,7 @@
     <div class="detail-collapsible">
       <div class="detail-header" id="detailHeader"></div>
       <div class="player-grid" id="playerGrid"></div>
+      <div id="routeDescSection"></div>
     </div>
     <div class="detail-collapse-bar" onclick="toggleStickyHeader()">
       <span class="collapse-label"><span class="collapse-label-text"></span></span>
@@ -1842,6 +1847,19 @@ function showPlay(num) {
       <div class="pos-label" style="color:${pc ? pc.color : 'var(--accent)'}">${posDot(pos)} ${pos}</div>
       <div class="pos-player">${play[pos] || '-'}</div></div>`;
   }).join('');
+  const routeDescEl = document.getElementById('routeDescSection');
+  if (play.routeDescriptions) {
+    try {
+      const rd = JSON.parse(play.routeDescriptions);
+      routeDescEl.innerHTML = '<div class="play-route-desc"><div class="route-desc-header">Route Directions</div>' +
+        ['C','Q','W','X','Y','Z'].filter(pos => rd[pos]).map(pos => {
+          const pc = posColors[pos];
+          return `<div class="route-item"><span class="route-pos" style="color:${pc ? pc.color : 'var(--accent)'}">${pos}</span><span>${rd[pos]}</span></div>`;
+        }).join('') + '</div>';
+    } catch(e) { routeDescEl.innerHTML = ''; }
+  } else {
+    routeDescEl.innerHTML = '';
+  }
   const diag = document.getElementById('diagramSection');
   const customImg = play.customDiagram;
   const builtinImg = diagrams[play.type];
@@ -4729,12 +4747,13 @@ function addAIPlayToPlaybook(blockIndex) {
     action: 'PASS',
     customDiagram: b._diagramBase64 || null,
     diagramData: b._diagramData ? JSON.stringify(b._diagramData) : null,
-    C: (b.routes && b.routes.C) || '',
-    Q: (b.routes && b.routes.Q) || '',
-    W: (b.routes && b.routes.W) || '',
-    X: (b.routes && b.routes.X) || '',
-    Y: (b.routes && b.routes.Y) || '',
-    Z: (b.routes && b.routes.Z) || '',
+    C: '',
+    Q: '',
+    W: '',
+    X: '',
+    Y: '',
+    Z: '',
+    routeDescriptions: b.routes ? JSON.stringify(b.routes) : '',
     target: b.primaryTarget || '',
     row: 0
   };
