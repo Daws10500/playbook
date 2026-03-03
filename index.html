@@ -664,6 +664,61 @@
     padding:8px 12px; background:var(--surface); text-align:center;
     font-size:12px; color:var(--text2); border-top:1px solid var(--border); flex-shrink:0;
   }
+
+  /* ========= PLAY ANIMATION OVERLAY ========= */
+  .anim-overlay {
+    display:none; position:fixed; inset:0; z-index:310;
+    background:var(--bg); flex-direction:column;
+  }
+  .anim-overlay.active { display:flex; }
+  .anim-toolbar {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px 12px; background:var(--surface);
+    border-bottom:1px solid var(--border); flex-shrink:0;
+  }
+  .anim-close-btn {
+    padding:7px 14px; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface2); color:var(--text); font-size:13px; font-weight:600; cursor:pointer;
+  }
+  .anim-title { font-size:15px; font-weight:700; }
+  .anim-phase { font-size:13px; font-weight:700; color:var(--accent); min-width:80px; text-align:right; }
+  .anim-canvas-wrap {
+    flex:1; overflow:hidden; display:flex; align-items:center; justify-content:center;
+    background:#1a1a2e;
+  }
+  .anim-canvas-wrap canvas { max-width:100%; max-height:100%; }
+  .anim-controls {
+    display:flex; align-items:center; gap:10px; padding:10px 12px;
+    background:var(--surface); border-top:1px solid var(--border); flex-shrink:0;
+  }
+  .anim-btn {
+    padding:10px 20px; border-radius:8px; border:none;
+    font-size:14px; font-weight:700; cursor:pointer; color:#fff; transition:all .15s;
+  }
+  .anim-play-btn { background:var(--green); flex:1; }
+  .anim-reset-btn { background:var(--surface2); color:var(--text); border:1px solid var(--border); }
+  .anim-btn:active { transform:scale(0.96); }
+  .anim-speed {
+    display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text2); margin-left:auto;
+  }
+  .anim-speed input { width:70px; }
+  .anim-legend {
+    display:flex; gap:12px; padding:8px 12px; justify-content:center; flex-wrap:wrap;
+    background:var(--surface); border-top:1px solid var(--border); flex-shrink:0;
+    font-size:11px; color:var(--text2);
+  }
+  .anim-legend-item { display:flex; align-items:center; gap:4px; }
+  .anim-legend-dot {
+    width:10px; height:10px; border-radius:50%; border:1.5px solid #fff;
+  }
+  .ai-anim-btn {
+    display:inline-flex; align-items:center; gap:4px;
+    margin-top:6px; padding:7px 14px; border-radius:6px; border:1px solid var(--border);
+    background:var(--surface2); color:var(--text); font-size:12px; font-weight:600;
+    cursor:pointer; transition:all .15s;
+  }
+  .ai-anim-btn:active { background:var(--accent); color:#fff; transform:scale(0.97); }
+
   .diagram-options {
     display:flex; gap:8px; margin-bottom:8px;
   }
@@ -997,6 +1052,24 @@
     <div id="diagramEditorCanvas" style="touch-action:none;"></div>
   </div>
   <div class="de-hint" id="deHint">Drag players to position. Tap a player to select, then pick a route.</div>
+</div>
+
+<!-- Play Animation Overlay -->
+<div class="anim-overlay" id="animOverlay">
+  <div class="anim-toolbar">
+    <button class="anim-close-btn" onclick="closePlayAnimation()">Close</button>
+    <span class="anim-title" id="animTitle">Play Animation</span>
+    <span class="anim-phase" id="animPhase">Pre-Snap</span>
+  </div>
+  <div class="anim-canvas-wrap">
+    <canvas id="animCanvas" width="800" height="580"></canvas>
+  </div>
+  <div class="anim-controls">
+    <button class="anim-btn anim-play-btn" id="animPlayBtn" onclick="animStart()">&#9654; Run Play</button>
+    <button class="anim-btn anim-reset-btn" onclick="animReset()">&#8634; Reset</button>
+    <div class="anim-speed"><label>Speed</label><input type="range" id="animSpeed" min="0.3" max="3" step="0.1" value="1"><span id="animSpeedVal">1x</span></div>
+  </div>
+  <div class="anim-legend" id="animLegend"></div>
 </div>
 
 <!-- Hidden file input for photo upload -->
@@ -3535,49 +3608,81 @@ function setAIMode(mode) {
   else document.querySelectorAll('.ai-mode-btn')[1].classList.add('active');
 }
 
-function renderNewPlayDiagram(formation, routePresets) {
+function renderNewPlayDiagram(formation, routePresets, playName) {
   const W = 800, H = 640;
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
 
-  // 1. Field background
-  ctx.fillStyle = '#2d5a27';
-  ctx.fillRect(0, 0, W, H);
-
-  // Yard lines
-  ctx.setLineDash([8, 8]);
-  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-  ctx.lineWidth = 1;
-  const lineCount = 9;
-  for (let i = 1; i < lineCount; i++) {
-    const ly = (H / lineCount) * i;
-    ctx.beginPath(); ctx.moveTo(20, ly); ctx.lineTo(W - 20, ly); ctx.stroke();
+  // Helper: rounded rectangle path
+  function rrect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
   }
 
-  // Line of scrimmage
-  ctx.setLineDash([]);
-  ctx.strokeStyle = 'rgba(255,215,0,0.5)';
-  ctx.lineWidth = 2;
-  const losY = H * 0.58;
-  ctx.beginPath(); ctx.moveTo(0, losY); ctx.lineTo(W, losY); ctx.stroke();
-  ctx.fillStyle = 'rgba(255,215,0,0.5)';
-  ctx.font = 'bold 11px sans-serif';
-  ctx.fillText('L.O.S.', W - 55, losY - 6);
+  // 1. Light background
+  ctx.fillStyle = '#f0f1f3';
+  ctx.fillRect(0, 0, W, H);
 
-  // 2. Get formation positions
+  // 2. Title header
+  if (playName) {
+    const hdrY = 10, hdrH = 44;
+    const name = playName.replace(/^New:\s*/i, '');
+    ctx.fillStyle = '#c8cad0';
+    rrect(24, hdrY, W - 48, hdrH, 8);
+    ctx.fill();
+    ctx.fillStyle = '#333';
+    ctx.font = 'bold 20px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(name, 44, hdrY + hdrH / 2);
+    ctx.fillStyle = '#666';
+    ctx.font = '14px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(formation, W - 44, hdrY + hdrH / 2);
+    ctx.textAlign = 'left';
+  }
+
+  // 3. Yard lines — subtle dashed
+  ctx.setLineDash([10, 8]);
+  ctx.strokeStyle = 'rgba(0,0,0,0.07)';
+  ctx.lineWidth = 1;
+  const numYardLines = 8;
+  for (let i = 1; i <= numYardLines; i++) {
+    const ly = (H / (numYardLines + 1)) * i;
+    ctx.beginPath(); ctx.moveTo(30, ly); ctx.lineTo(W - 30, ly); ctx.stroke();
+  }
+
+  // 4. Formation & LOS
   const formationData = FORMATIONS[formation];
   if (!formationData) return null;
 
-  const positions = ['C', 'Q', 'W', 'X', 'Y', 'Z'];
-  const playerRadius = 11;
-  const cSide = 20;
+  // LOS through receiver line (min y of non-Q positions)
+  let losY = 440;
+  const linePos = ['W', 'X', 'Y', 'Z'];
+  linePos.forEach(pos => { if (formationData[pos] && formationData[pos].y < losY) losY = formationData[pos].y; });
 
-  // Build diagramData for editor compatibility
+  ctx.setLineDash([10, 8]);
+  ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(20, losY); ctx.lineTo(W - 20, losY); ctx.stroke();
+  ctx.setLineDash([]);
+
+  const positions = ['C', 'Q', 'W', 'X', 'Y', 'Z'];
+  const playerRadius = 24;
+  const cSide = 42;
   const diagramPlayers = {};
   const diagramRoutes = {};
 
-  // 3. Draw routes first (under players)
+  // 5. Draw routes (under players)
   positions.forEach(pos => {
     const preset = routePresets[pos];
     if (!preset || preset === 'Snap') return;
@@ -3585,60 +3690,56 @@ function renderNewPlayDiagram(formation, routePresets) {
     if (!routeDef) return;
     const start = formationData[pos];
     if (!start) return;
-
     const pc = posColors[pos];
     const color = pc ? pc.color : '#888';
+    const r = pos === 'C' ? cSide / 2 : playerRadius;
 
-    // Build absolute points
-    const pts = [{ x: start.x, y: start.y }];
-    routeDef.points.forEach(p => {
-      pts.push({ x: start.x + p.dx, y: start.y + p.dy });
-    });
+    // Exit point from circle edge
+    const fp = routeDef.points[0];
+    const fd = Math.sqrt(fp.dx * fp.dx + fp.dy * fp.dy);
+    const exitX = fd > 0 ? start.x + (fp.dx / fd) * r : start.x;
+    const exitY = fd > 0 ? start.y + (fp.dy / fd) * r : start.y;
+
+    const pts = [{ x: exitX, y: exitY }];
+    routeDef.points.forEach(p => { pts.push({ x: start.x + p.dx, y: start.y + p.dy }); });
 
     // Draw polyline
     ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
-    if (routeDef.type === 'dashed') {
-      ctx.setLineDash([8, 6]);
-    } else {
-      ctx.setLineDash([]);
-    }
+    ctx.lineWidth = 5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.setLineDash(routeDef.type === 'dashed' ? [10, 8] : []);
     ctx.beginPath();
     ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) {
-      ctx.lineTo(pts[i].x, pts[i].y);
-    }
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Arrowhead or block bar at final point
+    // Arrowhead or block bar
     const last = pts[pts.length - 1];
     const prev = pts[pts.length - 2];
     const angle = Math.atan2(last.y - prev.y, last.x - prev.x);
 
     if (routeDef.type === 'block') {
-      // Perpendicular bar
-      const barLen = 10;
-      const perpAngle = angle + Math.PI / 2;
-      ctx.lineWidth = 3;
+      const barLen = 14;
+      const perp = angle + Math.PI / 2;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.moveTo(last.x + Math.cos(perpAngle) * barLen, last.y + Math.sin(perpAngle) * barLen);
-      ctx.lineTo(last.x - Math.cos(perpAngle) * barLen, last.y - Math.sin(perpAngle) * barLen);
+      ctx.moveTo(last.x + Math.cos(perp) * barLen, last.y + Math.sin(perp) * barLen);
+      ctx.lineTo(last.x - Math.cos(perp) * barLen, last.y - Math.sin(perp) * barLen);
       ctx.stroke();
     } else {
-      // Arrow triangle
-      const arrowLen = 10;
-      const arrowAngle = Math.PI / 6;
+      const aLen = 16, aAng = Math.PI / 6;
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.moveTo(last.x, last.y);
-      ctx.lineTo(last.x - arrowLen * Math.cos(angle - arrowAngle), last.y - arrowLen * Math.sin(angle - arrowAngle));
-      ctx.lineTo(last.x - arrowLen * Math.cos(angle + arrowAngle), last.y - arrowLen * Math.sin(angle + arrowAngle));
+      ctx.lineTo(last.x - aLen * Math.cos(angle - aAng), last.y - aLen * Math.sin(angle - aAng));
+      ctx.lineTo(last.x - aLen * Math.cos(angle + aAng), last.y - aLen * Math.sin(angle + aAng));
       ctx.closePath();
       ctx.fill();
     }
 
-    // Store for diagramData
     diagramRoutes[pos] = {
       points: routeDef.points.map(p => ({ dx: p.dx, dy: p.dy })),
       type: routeDef.type,
@@ -3646,7 +3747,7 @@ function renderNewPlayDiagram(formation, routePresets) {
     };
   });
 
-  // 4. Draw players
+  // 6. Draw players
   positions.forEach(pos => {
     const p = formationData[pos];
     if (!p) return;
@@ -3654,44 +3755,374 @@ function renderNewPlayDiagram(formation, routePresets) {
     const color = pc ? pc.color : '#888';
 
     if (pos === 'C') {
-      ctx.fillStyle = color;
-      ctx.fillRect(p.x - cSide / 2, p.y - cSide / 2, cSide, cSide);
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(p.x - cSide / 2, p.y - cSide / 2, cSide, cSide);
+      rrect(p.x - cSide / 2, p.y - cSide / 2, cSide, cSide, 5);
+      ctx.fillStyle = color; ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.stroke();
     } else {
-      ctx.fillStyle = color;
       ctx.beginPath();
       ctx.arc(p.x, p.y, playerRadius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      ctx.fillStyle = color; ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.stroke();
     }
 
-    // Letter label
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 12px sans-serif';
+    ctx.font = 'bold 17px -apple-system, BlinkMacSystemFont, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(pos, p.x, p.y);
+    ctx.fillText(pos, p.x, p.y + 1);
 
-    // Store for diagramData
     diagramPlayers[pos] = { x: p.x, y: p.y };
   });
 
-  // Convert canvas to base64
   const dataUrl = canvas.toDataURL('image/png');
   const imageBase64 = dataUrl.replace('data:image/png;base64,', '');
-
-  const diagramData = {
-    canvasW: W,
-    canvasH: H,
-    players: diagramPlayers,
-    routes: diagramRoutes
-  };
-
+  const diagramData = { canvasW: W, canvasH: H, players: diagramPlayers, routes: diagramRoutes };
   return { imageBase64, diagramData };
+}
+
+// ============= PLAY ANIMATION ENGINE =============
+let animState = null; // { formation, routePresets, playName, phase, animT, lastT, af, positions, routeT }
+
+function showPlayAnimation(formation, routePresets, playName) {
+  const overlay = document.getElementById('animOverlay');
+  overlay.classList.add('active');
+  document.body.style.overflow = 'hidden';
+
+  const formData = FORMATIONS[formation];
+  if (!formData) return;
+
+  // Build legend
+  const legend = document.getElementById('animLegend');
+  let legendHtml = '';
+  ['C','Q','W','X','Y','Z'].forEach(pos => {
+    if (!formData[pos]) return;
+    const c = posColors[pos] ? posColors[pos].color : '#888';
+    legendHtml += '<div class="anim-legend-item"><div class="anim-legend-dot" style="background:' + c + '"></div>' + pos + '</div>';
+  });
+  legend.innerHTML = legendHtml;
+
+  document.getElementById('animTitle').textContent = (playName || formation).replace(/^New:\s*/i, '');
+  document.getElementById('animPhase').textContent = 'Pre-Snap';
+  document.getElementById('animPlayBtn').innerHTML = '&#9654; Run Play';
+
+  // Scale canvas to fit wrapper
+  const canvas = document.getElementById('animCanvas');
+  const wrap = canvas.parentElement;
+  canvas.width = 800; canvas.height = 580;
+
+  animState = {
+    formation, routePresets, playName, formData,
+    phase: 'idle', animT: 0, lastT: 0, af: null,
+    positions: {},
+    routeT: 0, snapT: 0
+  };
+  // Init positions
+  ['C','Q','W','X','Y','Z'].forEach(pos => {
+    if (formData[pos]) animState.positions[pos] = { x: formData[pos].x, y: formData[pos].y };
+  });
+
+  animRender();
+}
+
+function closePlayAnimation() {
+  if (animState && animState.af) cancelAnimationFrame(animState.af);
+  animState = null;
+  const overlay = document.getElementById('animOverlay');
+  overlay.classList.remove('active');
+  document.body.style.overflow = '';
+}
+
+function animGetSpeed() {
+  return parseFloat(document.getElementById('animSpeed').value) || 1;
+}
+document.addEventListener('DOMContentLoaded', function() {
+  const sp = document.getElementById('animSpeed');
+  if (sp) sp.addEventListener('input', function(e) {
+    document.getElementById('animSpeedVal').textContent = parseFloat(e.target.value).toFixed(1) + 'x';
+  });
+});
+
+function animInterp(path, t) {
+  if (t <= 0) return path[0];
+  if (t >= 1) return path[path.length - 1];
+  let totalLen = 0;
+  const segs = [];
+  for (let i = 1; i < path.length; i++) {
+    const dx = path[i].x - path[i-1].x, dy = path[i].y - path[i-1].y;
+    const len = Math.sqrt(dx*dx + dy*dy);
+    segs.push(len); totalLen += len;
+  }
+  if (totalLen === 0) return path[0];
+  let target = t * totalLen, acc = 0;
+  for (let i = 0; i < segs.length; i++) {
+    if (acc + segs[i] >= target) {
+      const s = (target - acc) / segs[i];
+      return {
+        x: path[i].x + (path[i+1].x - path[i].x) * s,
+        y: path[i].y + (path[i+1].y - path[i].y) * s
+      };
+    }
+    acc += segs[i];
+  }
+  return path[path.length - 1];
+}
+
+function animDrawField(ctx, W, H) {
+  // Turf gradient
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#145214'); g.addColorStop(0.3, '#1a6b1a');
+  g.addColorStop(0.5, '#1e7a1e'); g.addColorStop(0.7, '#1a6b1a');
+  g.addColorStop(1, '#145214');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  // Yard lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.lineWidth = 1;
+  for (let i = 1; i <= 8; i++) {
+    const ly = (H / 9) * i;
+    ctx.beginPath(); ctx.moveTo(30, ly); ctx.lineTo(W - 30, ly); ctx.stroke();
+  }
+
+  // Hash marks
+  for (let i = 1; i <= 8; i++) {
+    const ly = (H / 9) * i;
+    [W * 0.35, W * 0.65].forEach(hx => {
+      ctx.beginPath(); ctx.moveTo(hx - 4, ly); ctx.lineTo(hx + 4, ly); ctx.stroke();
+    });
+  }
+
+  // LOS — through formation receiver line
+  const losY = animState ? Math.min(
+    ...['W','X','Y','Z'].map(p => animState.formData[p] ? animState.formData[p].y : 999)
+  ) : H * 0.5;
+  // Scale LOS from 800x640 space to 800x580 animation space
+  const scaledLOS = losY * (H / 640);
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2; ctx.setLineDash([10, 7]);
+  ctx.beginPath(); ctx.moveTo(20, scaledLOS); ctx.lineTo(W - 20, scaledLOS); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.font = 'bold 10px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText('LINE OF SCRIMMAGE', W - 30, scaledLOS - 8);
+  ctx.textAlign = 'center';
+}
+
+function animDrawRoute(ctx, pos, t, scaleY) {
+  if (!animState) return;
+  const preset = animState.routePresets[pos];
+  if (!preset || preset === 'Snap') return;
+  const routeDef = ROUTE_PRESETS[preset];
+  if (!routeDef) return;
+  const start = animState.formData[pos];
+  if (!start) return;
+  const pc = posColors[pos];
+  const color = pc ? pc.color : '#888';
+
+  // Build path in animation space
+  const path = [{ x: start.x, y: start.y * scaleY }];
+  routeDef.points.forEach(p => {
+    path.push({ x: start.x + p.dx, y: (start.y + p.dy) * scaleY });
+  });
+
+  // Draw partial path up to t
+  let totalLen = 0;
+  const segs = [];
+  for (let i = 1; i < path.length; i++) {
+    const dx = path[i].x - path[i-1].x, dy = path[i].y - path[i-1].y;
+    segs.push(Math.sqrt(dx*dx + dy*dy)); totalLen += segs[segs.length-1];
+  }
+  if (totalLen === 0) return;
+  const drawLen = t * totalLen;
+
+  ctx.strokeStyle = color; ctx.lineWidth = 4;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.setLineDash(routeDef.type === 'dashed' ? [10, 8] : []);
+  ctx.beginPath(); ctx.moveTo(path[0].x, path[0].y);
+  let acc = 0;
+  let endX = path[0].x, endY = path[0].y;
+  let prevX = path[0].x, prevY = path[0].y;
+  for (let i = 0; i < segs.length; i++) {
+    if (acc + segs[i] <= drawLen) {
+      ctx.lineTo(path[i+1].x, path[i+1].y);
+      prevX = endX; prevY = endY;
+      endX = path[i+1].x; endY = path[i+1].y;
+      acc += segs[i];
+    } else {
+      const s = (drawLen - acc) / segs[i];
+      const nx = path[i].x + (path[i+1].x - path[i].x) * s;
+      const ny = path[i].y + (path[i+1].y - path[i].y) * s;
+      ctx.lineTo(nx, ny);
+      prevX = endX; prevY = endY;
+      endX = nx; endY = ny;
+      break;
+    }
+  }
+  ctx.stroke(); ctx.setLineDash([]);
+
+  // Arrowhead at current end (if t > 0.15)
+  if (t > 0.15) {
+    const angle = Math.atan2(endY - prevY, endX - prevX);
+    if (routeDef.type === 'block') {
+      const barLen = 12, perp = angle + Math.PI / 2;
+      ctx.strokeStyle = color; ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(endX + Math.cos(perp) * barLen, endY + Math.sin(perp) * barLen);
+      ctx.lineTo(endX - Math.cos(perp) * barLen, endY - Math.sin(perp) * barLen);
+      ctx.stroke();
+    } else {
+      const aLen = 12, aAng = Math.PI / 6;
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.moveTo(endX, endY);
+      ctx.lineTo(endX - aLen * Math.cos(angle - aAng), endY - aLen * Math.sin(angle - aAng));
+      ctx.lineTo(endX - aLen * Math.cos(angle + aAng), endY - aLen * Math.sin(angle + aAng));
+      ctx.closePath(); ctx.fill();
+    }
+  }
+
+  // Route label at 55% if t > 0.5
+  if (t > 0.5 && preset !== 'Block') {
+    const mp = animInterp(path, 0.55);
+    ctx.font = '11px sans-serif';
+    const tw = ctx.measureText(preset).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(mp.x + 12, mp.y - 14, tw + 8, 16);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.textAlign = 'left';
+    ctx.fillText(preset, mp.x + 16, mp.y - 4);
+    ctx.textAlign = 'center';
+  }
+}
+
+function animDrawPlayer(ctx, pos, x, y, highlight) {
+  const pc = posColors[pos];
+  const color = pc ? pc.color : '#888';
+  const r = 16;
+
+  if (highlight) { ctx.shadowColor = color; ctx.shadowBlur = 18; }
+
+  // Outer ring
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(x, y, r + 3, 0, Math.PI * 2); ctx.stroke();
+
+  if (pos === 'C') {
+    const s = r * 1.6;
+    ctx.fillStyle = color; ctx.globalAlpha = 0.92;
+    ctx.fillRect(x - s/2, y - s/2, s, s);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5;
+    ctx.strokeRect(x - s/2, y - s/2, s, s);
+  } else {
+    ctx.fillStyle = color; ctx.globalAlpha = 0.92;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
+
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 13px sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(pos, x, y);
+}
+
+function animRender() {
+  if (!animState) return;
+  const canvas = document.getElementById('animCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const scaleY = H / 640; // map 640-space y to 580-space
+
+  ctx.clearRect(0, 0, W, H);
+  animDrawField(ctx, W, H);
+
+  const phase = animState.phase;
+  const rt = (phase === 'routes') ? animState.routeT : (phase === 'done' ? 1 : 0);
+
+  // Draw routes
+  if (rt > 0) {
+    ['C','Q','W','X','Y','Z'].forEach(pos => {
+      animDrawRoute(ctx, pos, rt, scaleY);
+    });
+  }
+
+  // Draw players
+  ['C','Q','W','X','Y','Z'].forEach(pos => {
+    const p = animState.positions[pos];
+    if (!p) return;
+    animDrawPlayer(ctx, pos, p.x, p.y * scaleY, false);
+  });
+}
+
+function animLoop(ts) {
+  if (!animState || animState.phase === 'idle' || animState.phase === 'done') return;
+  if (!animState.lastT) animState.lastT = ts;
+  const dt = (ts - animState.lastT) * animGetSpeed();
+  animState.lastT = ts;
+
+  const SNAP_DUR = 400, ROUTE_DUR = 2200;
+
+  if (animState.phase === 'snap') {
+    animState.snapT += dt;
+    if (animState.snapT >= SNAP_DUR) {
+      animState.phase = 'routes'; animState.animT = 0;
+      document.getElementById('animPhase').textContent = 'Routes';
+    }
+  } else if (animState.phase === 'routes') {
+    animState.animT += dt;
+    animState.routeT = Math.min(1, animState.animT / ROUTE_DUR);
+
+    // Move players along routes
+    ['C','Q','W','X','Y','Z'].forEach(pos => {
+      const preset = animState.routePresets[pos];
+      if (!preset || preset === 'Snap') {
+        // QB drop back
+        if (pos === 'Q' && animState.formData[pos]) {
+          const orig = animState.formData[pos];
+          animState.positions[pos] = { x: orig.x, y: orig.y + Math.min(1, animState.routeT * 1.5) * 40 };
+        }
+        return;
+      }
+      const routeDef = ROUTE_PRESETS[preset];
+      if (!routeDef) return;
+      const start = animState.formData[pos];
+      if (!start) return;
+      // Build path
+      const path = [{ x: start.x, y: start.y }];
+      routeDef.points.forEach(p => { path.push({ x: start.x + p.dx, y: start.y + p.dy }); });
+      const cur = animInterp(path, animState.routeT);
+      animState.positions[pos] = { x: cur.x, y: cur.y };
+    });
+
+    if (animState.routeT >= 1) {
+      animState.phase = 'done';
+      document.getElementById('animPhase').textContent = 'Complete';
+      document.getElementById('animPlayBtn').innerHTML = '&#8634; Replay';
+      animRender(); return;
+    }
+  }
+
+  animRender();
+  animState.af = requestAnimationFrame(animLoop);
+}
+
+function animStart() {
+  if (!animState) return;
+  if (animState.phase === 'done') { animReset(); setTimeout(animStart, 100); return; }
+  if (animState.phase !== 'idle') return;
+  animState.phase = 'snap'; animState.snapT = 0; animState.lastT = 0;
+  document.getElementById('animPhase').textContent = 'Snap!';
+  document.getElementById('animPlayBtn').innerHTML = '&#9654; Running...';
+  animState.af = requestAnimationFrame(animLoop);
+}
+
+function animReset() {
+  if (!animState) return;
+  if (animState.af) cancelAnimationFrame(animState.af);
+  animState.phase = 'idle'; animState.animT = 0; animState.routeT = 0; animState.snapT = 0; animState.lastT = 0;
+  ['C','Q','W','X','Y','Z'].forEach(pos => {
+    if (animState.formData[pos]) animState.positions[pos] = { x: animState.formData[pos].x, y: animState.formData[pos].y };
+  });
+  document.getElementById('animPhase').textContent = 'Pre-Snap';
+  document.getElementById('animPlayBtn').innerHTML = '&#9654; Run Play';
+  animRender();
 }
 
 function showAILoading() {
@@ -3725,7 +4156,7 @@ function showAIResults(result) {
   result.block.forEach((b, idx) => {
     // Render diagram for new plays that have formation + routePresets
     if (b.isNew && b.formation && b.routePresets && !b._diagramBase64) {
-      const diagResult = renderNewPlayDiagram(b.formation, b.routePresets);
+      const diagResult = renderNewPlayDiagram(b.formation, b.routePresets, b.playType);
       if (diagResult) {
         b._diagramBase64 = diagResult.imageBase64;
         b._diagramData = diagResult.diagramData;
@@ -3757,9 +4188,14 @@ function showAIResults(result) {
       html += '</div>';
     }
 
-    // Add to Playbook button for new plays
+    // Add to Playbook and Animate buttons for new plays
     if (b.isNew) {
-      html += '<button class="ai-add-playbook-btn" onclick="addAIPlayToPlaybook(' + idx + ')">+ Add to Playbook</button>';
+      html += '<div style="display:flex;gap:8px;margin-top:8px;">';
+      html += '<button class="ai-add-playbook-btn" style="margin-top:0;" onclick="addAIPlayToPlaybook(' + idx + ')">+ Add to Playbook</button>';
+      if (b.formation && b.routePresets) {
+        html += '<button class="ai-anim-btn" onclick="showPlayAnimation(\'' + (b.formation || '').replace(/'/g, "\\'") + '\',' + JSON.stringify(b.routePresets) + ',\'' + (b.playType || '').replace(/'/g, "\\'") + '\')">&#9654; Animate</button>';
+      }
+      html += '</div>';
     }
 
     html += '</div>';
