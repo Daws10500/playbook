@@ -3210,7 +3210,7 @@ const ANTHROPIC_MODELS = [
 ];
 const OLLAMA_DEFAULT_MODELS = [
   {
-    id: 'gemini-3-flash-preview',
+    id: 'gemini-3-flash-preview:cloud',
     name: 'Gemini 3 Flash Preview',
     contextWindow: 1048576,
     supportsThinking: true,
@@ -3219,7 +3219,7 @@ const OLLAMA_DEFAULT_MODELS = [
     description: 'Google Gemini — fast, strong reasoning, 1M context'
   },
   {
-    id: 'deepseek-v3.2',
+    id: 'deepseek-v3.2:cloud',
     name: 'DeepSeek V3.2',
     contextWindow: 163840,
     supportsThinking: true,
@@ -3228,7 +3228,7 @@ const OLLAMA_DEFAULT_MODELS = [
     description: 'DeepSeek — strong reasoning & agent performance, 160K context'
   },
   {
-    id: 'qwen3-coder-next',
+    id: 'qwen3-coder-next:cloud',
     name: 'Qwen3 Coder Next',
     contextWindow: 262144,
     supportsThinking: false,
@@ -3276,7 +3276,7 @@ function loadAISettings() {
   return {
     provider: 'anthropic',
     anthropic: { apiKey: '', model: 'claude-sonnet-4-6' },
-    ollama: { endpoint: 'http://localhost:11434', apiKey: '', model: 'gemini-3-flash-preview', thinking: true, temperature: 0.7, numCtx: 8192 },
+    ollama: { endpoint: 'http://localhost:11434', apiKey: '', model: 'gemini-3-flash-preview:cloud', thinking: true, temperature: 0.7, numCtx: 8192 },
     proxyUrl: SUPABASE_URL + '/functions/v1/ai-proxy'
   };
 }
@@ -4193,7 +4193,7 @@ function showAIResults(result) {
       html += '<div style="display:flex;gap:8px;margin-top:8px;">';
       html += '<button class="ai-add-playbook-btn" style="margin-top:0;" onclick="addAIPlayToPlaybook(' + idx + ')">+ Add to Playbook</button>';
       if (b.formation && b.routePresets) {
-        html += '<button class="ai-anim-btn" onclick="showPlayAnimation(\'' + (b.formation || '').replace(/'/g, "\\'") + '\',' + JSON.stringify(b.routePresets) + ',\'' + (b.playType || '').replace(/'/g, "\\'") + '\')">&#9654; Animate</button>';
+        html += '<button class="ai-anim-btn" onclick="animateAIPlay(' + idx + ')">&#9654; Animate</button>';
       }
       html += '</div>';
     }
@@ -4220,6 +4220,14 @@ function showAIResults(result) {
   html += '</div>';
 
   area.innerHTML = html;
+}
+
+function animateAIPlay(blockIndex) {
+  if (!aiCurrentResult || !aiCurrentResult.block || !aiCurrentResult.block[blockIndex]) return;
+  const b = aiCurrentResult.block[blockIndex];
+  if (b.formation && b.routePresets) {
+    showPlayAnimation(b.formation, b.routePresets, b.playType);
+  }
 }
 
 function addAIPlayToPlaybook(blockIndex) {
