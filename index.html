@@ -3194,7 +3194,7 @@ function loadAISettings() {
   return {
     provider: 'anthropic',
     anthropic: { apiKey: '', model: 'claude-sonnet-4-6' },
-    ollama: { endpoint: 'http://localhost:11434', model: 'gemini-3-flash-preview', thinking: true, temperature: 0.7, numCtx: 8192 },
+    ollama: { endpoint: 'http://localhost:11434', apiKey: '', model: 'gemini-3-flash-preview', thinking: true, temperature: 0.7, numCtx: 8192 },
     proxyUrl: SUPABASE_URL + '/functions/v1/ai-proxy'
   };
 }
@@ -3385,9 +3385,11 @@ async function callAI(systemPrompt, userMessage) {
       }
     };
     if (useThinking) reqBody.think = true;
+    const ollamaHeaders = { 'Content-Type': 'application/json' };
+    if (settings.ollama.apiKey) ollamaHeaders['Authorization'] = 'Bearer ' + settings.ollama.apiKey;
     const resp = await fetch(endpoint + '/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: ollamaHeaders,
       body: JSON.stringify(reqBody)
     });
     if (!resp.ok) {
@@ -3749,6 +3751,8 @@ function showAISettings() {
   html += '<div id="aiSettingsOllama" style="' + (settings.provider !== 'ollama' ? 'display:none;' : '') + '">';
   html += '<label>Endpoint</label>';
   html += '<input type="text" id="aiSettingsEndpoint" value="' + (settings.ollama.endpoint || 'http://localhost:11434') + '">';
+  html += '<label>API Key</label>';
+  html += '<input type="password" id="aiSettingsOllamaKey" value="' + (settings.ollama.apiKey || '') + '" placeholder="Optional — for cloud Ollama">';
 
   // Model dropdown
   html += '<label>Model</label>';
@@ -3840,6 +3844,7 @@ function saveAISettingsFromModal() {
     },
     ollama: {
       endpoint: document.getElementById('aiSettingsEndpoint').value.trim(),
+      apiKey: document.getElementById('aiSettingsOllamaKey').value.trim(),
       model: document.getElementById('aiSettingsOllamaModel').value,
       thinking: document.getElementById('aiSettingsThinking').checked,
       temperature: parseFloat(document.getElementById('aiSettingsTemp').value),
