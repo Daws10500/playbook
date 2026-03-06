@@ -3952,10 +3952,12 @@ async function callAI(systemPrompt, userMessage) {
     let resp;
     if (settings.ollama.apiKey) {
       // Cloud mode: call Ollama cloud API directly
-      const cloudEndpoint = (endpoint === 'http://localhost:11434') ? 'https://ollama.com' : endpoint;
+      const isLocalEndpoint = !endpoint || endpoint.includes('localhost') || endpoint.includes('127.0.0.1');
+      const cloudEndpoint = isLocalEndpoint ? 'https://ollama.com' : endpoint.replace(/\/+$/, '');
+      const cloudUrl = new URL('/api/chat', cloudEndpoint).href;
       const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + settings.ollama.apiKey };
       try {
-        resp = await fetch(cloudEndpoint + '/api/chat', {
+        resp = await fetch(cloudUrl, {
           method: 'POST',
           headers: headers,
           body: JSON.stringify(reqBody)
