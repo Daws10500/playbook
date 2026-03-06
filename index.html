@@ -3991,8 +3991,12 @@ async function callAI(systemPrompt, userMessage) {
       if (resp.status === 401 || resp.status === 403) throw new Error('Ollama API key is invalid or expired. Check your key in AI Settings.');
       throw new Error('Ollama error (' + resp.status + '): ' + (errText || 'Is Ollama running at ' + endpoint + '?'));
     }
-    const data = await resp.json();
-    if (data.error) throw new Error(data.error.message || data.error);
+    const respText = await resp.text();
+    let data;
+    try { data = JSON.parse(respText); } catch(e) {
+      throw new Error('AI_RAW:Ollama API returned non-JSON: ' + respText.slice(0, 300));
+    }
+    if (data.error) throw new Error(typeof data.error === 'string' ? data.error : (data.error.message || JSON.stringify(data.error)));
     if (data.message) {
       // When thinking is enabled, actual content may be empty string while thinking has reasoning
       // Prefer content if it has substance; fall back to thinking only if content is truly empty
@@ -4835,7 +4839,7 @@ async function generatePlayBlock() {
       parsed = JSON.parse(cleaned);
     } catch(parseErr) {
       console.error('Raw AI response:', raw);
-      throw new SyntaxError('Invalid JSON from AI model');
+      throw new Error('AI_RAW:' + raw.slice(0, 300));
     }
 
     // Validate play references
@@ -4870,8 +4874,9 @@ async function generatePlayBlock() {
     showAIResults(result);
   } catch(e) {
     console.error('AI generation error:', e);
-    if (e instanceof SyntaxError) {
-      showAIError('Failed to parse AI response. The model returned invalid JSON. Try again.');
+    if (e.message && e.message.startsWith('AI_RAW:')) {
+      const raw = e.message.slice(7);
+      showAIError('Model returned invalid JSON. Raw response:<br><pre style="text-align:left;font-size:11px;max-height:200px;overflow:auto;background:var(--surface);padding:8px;border-radius:4px;margin-top:8px;white-space:pre-wrap;word-break:break-all;">' + raw.replace(/</g,'&lt;') + '</pre>');
     } else {
       showAIError(e.message || 'An unexpected error occurred.');
     }
