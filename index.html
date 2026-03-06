@@ -3951,20 +3951,30 @@ async function callAI(systemPrompt, userMessage) {
     if (useThinking) reqBody.think = true;
     let resp;
     if (settings.ollama.apiKey) {
-      // Cloud mode: route through Supabase edge function proxy to avoid CORS
-      // Use https://ollama.com for cloud mode unless user explicitly set a different cloud endpoint
+      // Cloud mode: call Ollama cloud API directly
       const cloudEndpoint = (endpoint === 'http://localhost:11434') ? 'https://ollama.com' : endpoint;
-      const proxyUrl = settings.proxyUrl || SUPABASE_URL + '/functions/v1/ai-proxy';
-      resp = await fetch(proxyUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: 'ollama',
-          apiKey: settings.ollama.apiKey,
-          endpoint: cloudEndpoint,
-          ollamaBody: reqBody
-        })
-      });
+      const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + settings.ollama.apiKey };
+      try {
+        resp = await fetch(cloudEndpoint + '/api/chat', {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(reqBody)
+        });
+      } catch(directErr) {
+        // CORS blocked — fall back to proxy
+        console.warn('Direct Ollama cloud call failed, trying proxy:', directErr.message);
+        const proxyUrl = settings.proxyUrl || SUPABASE_URL + '/functions/v1/ai-proxy';
+        resp = await fetch(proxyUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider: 'ollama',
+            apiKey: settings.ollama.apiKey,
+            endpoint: cloudEndpoint,
+            ollamaBody: reqBody
+          })
+        });
+      }
     } else {
       // Local mode: direct call to Ollama instance
       resp = await fetch(endpoint + '/api/chat', {
@@ -4771,6 +4781,7 @@ function addAIPlayToPlaybook(blockIndex) {
   plays.push(newPlay);
   if (!playTypes.includes(playName)) playTypes.push(playName);
   savePlays();
+  console.log('Added AI play to playbook:', playName, '(#' + nextNum + '). Total plays:', plays.length);
   showPlay(nextNum);
 }
 
