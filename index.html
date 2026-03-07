@@ -3084,13 +3084,19 @@ function showGamePlayDetail(idx) {
     <div style="flex:1;text-align:center;font-weight:700;font-size:15px;">#${idx+1} ${name}</div>
   </div>`;
 
-  // Diagram
+  // Diagram — check play's custom diagram first, then builtins
+  const customImg = play ? play.customDiagram : null;
   const diagramKey = call.playType || (play ? play.type : null);
-  if (diagramKey && diagrams[diagramKey]) {
-    const img = diagrams[diagramKey];
-    const mime = img.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
+  const builtinImg = diagramKey ? diagrams[diagramKey] : null;
+  if (customImg) {
+    const mime = customImg.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
     html += `<div class="seq-diagram-section">
-      <img src="data:${mime};base64,${img}" alt="${name}">
+      <img src="data:${mime};base64,${customImg}" alt="${name}">
+    </div>`;
+  } else if (builtinImg) {
+    const mime = builtinImg.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
+    html += `<div class="seq-diagram-section">
+      <img src="data:${mime};base64,${builtinImg}" alt="${name}">
     </div>`;
   }
 
@@ -4858,8 +4864,8 @@ async function generatePlayBlock() {
       block: parsed.block || []
     };
 
-    saveAIResult(result);
     showAIResults(result);
+    saveAIResult(result);
   } catch(e) {
     console.error('AI generation error:', e);
     if (e.message && e.message.startsWith('AI_RAW:')) {
@@ -4907,18 +4913,35 @@ function pushAIBlockToGame(gameId) {
 
   aiCurrentResult.block.forEach(b => {
     if (b.isNew) {
-      // New play — add with description and diagram
+      // New play — also add to playbook
+      const playName = b.playType.replace(/^New:\s*/, '');
+      let existingPlay = plays.find(p => p.type === playName);
+      if (!existingPlay) {
+        const nextNum = plays.length > 0 ? Math.max(...plays.map(p => p.num)) + 1 : 1;
+        existingPlay = {
+          num: nextNum,
+          type: playName,
+          variation: b.description || '',
+          action: 'PASS',
+          customDiagram: b._diagramBase64 || null,
+          diagramData: b._diagramData ? JSON.stringify(b._diagramData) : null,
+          C: '', Q: '', W: '', X: '', Y: '', Z: '',
+          routeDescriptions: b.routes ? JSON.stringify(b.routes) : '',
+          target: b.primaryTarget || '',
+          row: 0
+        };
+        plays.push(existingPlay);
+        if (!playTypes.includes(playName)) playTypes.push(playName);
+      }
       game.calls.push({
-        playNum: null,
-        playType: b.playType,
+        playNum: existingPlay.num,
+        playType: playName,
         result: '',
         C: '', Q: '', W: '', X: '', Y: '', Z: '',
         time: new Date().toLocaleTimeString(),
         isAISuggested: true,
         aiDescription: b.description || '',
-        aiRoutes: b.routes || {},
-        customDiagram: b._diagramBase64 || null,
-        diagramData: b._diagramData ? JSON.stringify(b._diagramData) : null
+        aiRoutes: b.routes || {}
       });
     } else {
       // Existing play
@@ -4935,6 +4958,7 @@ function pushAIBlockToGame(gameId) {
     }
   });
 
+  savePlays();
   saveGames();
   activeGameId = gameId;
   showView('games');
