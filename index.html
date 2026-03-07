@@ -452,7 +452,6 @@
     background:var(--surface2); color:var(--text2);
   }
   .seq-btn:active { transform:scale(0.9); }
-  .seq-btn.seq-up, .seq-btn.seq-down { font-size:14px; font-weight:700; }
   .seq-btn.seq-check { background:rgba(0,184,148,0.15); color:var(--green); }
   .seq-btn.seq-check.active { background:var(--green); color:#fff; }
   .seq-btn.seq-x { background:rgba(225,112,85,0.15); color:var(--red); }
@@ -463,6 +462,21 @@
   }
   .seq-result-badge.success { background:rgba(0,184,148,0.2); color:var(--green); }
   .seq-result-badge.fail { background:rgba(225,112,85,0.2); color:var(--red); }
+  /* ========= SEQ DRAG & DROP ========= */
+  .seq-card .seq-drag-handle {
+    display:flex; align-items:center; justify-content:center;
+    width:24px; flex-shrink:0; cursor:grab;
+    color:var(--text2); font-size:16px; opacity:0.4;
+    touch-action:none; -webkit-user-select:none; user-select:none;
+  }
+  .seq-card .seq-drag-handle:active { cursor:grabbing; opacity:0.8; }
+  .seq-card.seq-dragging {
+    opacity:0.4; background:var(--surface2); border:1px dashed var(--accent);
+    transform:scale(0.97);
+  }
+  .seq-card.seq-drag-over {
+    border-top:3px solid var(--accent); margin-top:0;
+  }
   .seq-add-bar {
     padding:10px 16px;
   }
@@ -1139,6 +1153,21 @@ async function fullSync() {
       ollama_models: { get: () => localStorage.getItem('playbook_ollama_models'), set: v => { localStorage.setItem('playbook_ollama_models', v); } },
       ai_settings:   { get: () => localStorage.getItem('playbook_ai_settings'),   set: v => { localStorage.setItem('playbook_ai_settings', v); } }
     };
+
+    // If Supabase is empty (first sync ever), push everything from this device
+    if (rows.length === 0) {
+      for (const [key, fns] of Object.entries(keyMap)) {
+        const localVal = fns.get();
+        if (localVal != null) {
+          const parsed = (() => { try { return JSON.parse(localVal); } catch(e) { return localVal; } })();
+          await pushToSupabase(key, parsed);
+          syncMeta[key] = new Date().toISOString();
+        }
+      }
+      localStorage.setItem('playbook_sync_meta', JSON.stringify(syncMeta));
+      updateSyncIndicator('synced');
+      return;
+    }
 
     let changed = false;
     for (const [key, fns] of Object.entries(keyMap)) {
@@ -2999,7 +3028,8 @@ function renderActiveGame() {
       const playerSummary = assigned.length > 0 ? assigned.join(' · ') : 'No players assigned';
       const resultClass = c.result === 'SUCCESS' ? 'seq-success' : c.result === 'FAIL' ? 'seq-fail' : '';
       const thumbSrc = playDiagramSrc(play);
-      html += `<div class="seq-card ${resultClass}">
+      html += `<div class="seq-card ${resultClass}" draggable="true" data-seq-idx="${i}">
+        <div class="seq-drag-handle" title="Drag to reorder">&#8942;&#8942;</div>
         <div class="seq-order">${i + 1}</div>
         ${thumbSrc ? `<img class="seq-thumb" src="${thumbSrc}" alt="" onclick="showGamePlayDetail(${i})">` : ''}
         <div class="seq-info" onclick="showGamePlayDetail(${i})">
@@ -3009,8 +3039,6 @@ function renderActiveGame() {
         <div class="seq-actions">
           <button class="seq-btn seq-check ${c.result==='SUCCESS'?'active':''}" onclick="markGameCall(${i},'SUCCESS')" title="Success">&#10003;</button>
           <button class="seq-btn seq-x ${c.result==='FAIL'?'active':''}" onclick="markGameCall(${i},'FAIL')" title="Fail">&#10007;</button>
-          <button class="seq-btn seq-up" onclick="moveGameCall(${i},-1)" title="Move up" ${i===0?'disabled':''}>&#9650;</button>
-          <button class="seq-btn seq-down" onclick="moveGameCall(${i},1)" title="Move down" ${i===game.calls.length-1?'disabled':''}>&#9660;</button>
           <button class="seq-btn seq-remove" onclick="removeGameCall(${i})" title="Remove">&#215;</button>
         </div>
       </div>`;
@@ -3026,6 +3054,7 @@ function renderActiveGame() {
   </div>`;
 
   document.getElementById('gamesContent').innerHTML = html;
+  initSeqDragAndDrop();
 }
 
 function showAddGamePlay() {
@@ -3067,8 +3096,8 @@ function markGameCall(idx, result) {
   if (!game || !game.calls[idx]) return;
   // Toggle: if already this result, clear it
   game.calls[idx].result = game.calls[idx].result === result ? '' : result;
-  saveGames();
   renderActiveGame();
+  saveGames();
 }
 
 function moveGameCall(idx, dir) {
@@ -3079,16 +3108,130 @@ function moveGameCall(idx, dir) {
   const temp = game.calls[idx];
   game.calls[idx] = game.calls[newIdx];
   game.calls[newIdx] = temp;
-  saveGames();
   renderActiveGame();
+  saveGames();
 }
 
 function removeGameCall(idx) {
   const game = games.find(g => g.id === activeGameId);
   if (!game) return;
   game.calls.splice(idx, 1);
-  saveGames();
   renderActiveGame();
+  saveGames();
+}
+
+// ============= GAME SEQUENCE DRAG & DROP =============
+let seqDragSrcIdx = null;
+let seqDragTouchEl = null;
+
+function initSeqDragAndDrop() {
+  const cards = document.querySelectorAll('.seq-card[draggable]');
+  cards.forEach(card => {
+    card.addEventListener('dragstart', seqDragStart);
+    card.addEventListener('dragover', seqDragOver);
+    card.addEventListener('dragenter', seqDragEnter);
+    card.addEventListener('dragleave', seqDragLeave);
+    card.addEventListener('drop', seqDrop);
+    card.addEventListener('dragend', seqDragEnd);
+    const handle = card.querySelector('.seq-drag-handle');
+    if (handle) {
+      handle.addEventListener('touchstart', seqTouchStart, {passive:false});
+      handle.addEventListener('touchmove', seqTouchMove, {passive:false});
+      handle.addEventListener('touchend', seqTouchEnd, {passive:false});
+    }
+  });
+}
+
+function seqDragStart(e) {
+  seqDragSrcIdx = parseInt(this.dataset.seqIdx);
+  this.classList.add('seq-dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', seqDragSrcIdx);
+  setTimeout(() => this.style.pointerEvents = 'none', 0);
+}
+
+function seqDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+}
+
+function seqDragEnter(e) {
+  e.preventDefault();
+  this.classList.add('seq-drag-over');
+}
+
+function seqDragLeave(e) {
+  this.classList.remove('seq-drag-over');
+}
+
+function seqDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  this.classList.remove('seq-drag-over');
+  const toIdx = parseInt(this.dataset.seqIdx);
+  if (seqDragSrcIdx !== null && seqDragSrcIdx !== toIdx) {
+    reorderGameCall(seqDragSrcIdx, toIdx);
+  }
+}
+
+function seqDragEnd(e) {
+  this.classList.remove('seq-dragging');
+  this.style.pointerEvents = '';
+  document.querySelectorAll('.seq-card').forEach(c => {
+    c.classList.remove('seq-drag-over');
+    c.classList.remove('seq-dragging');
+  });
+  seqDragSrcIdx = null;
+}
+
+function seqTouchStart(e) {
+  e.preventDefault();
+  const card = e.target.closest('.seq-card');
+  if (!card) return;
+  seqDragSrcIdx = parseInt(card.dataset.seqIdx);
+  seqDragTouchEl = card;
+  card.classList.add('seq-dragging');
+}
+
+function seqTouchMove(e) {
+  e.preventDefault();
+  if (!seqDragTouchEl) return;
+  const touch = e.touches[0];
+  const target = document.elementFromPoint(touch.clientX, touch.clientY);
+  document.querySelectorAll('.seq-card').forEach(c => c.classList.remove('seq-drag-over'));
+  const overCard = target ? target.closest('.seq-card') : null;
+  if (overCard && overCard !== seqDragTouchEl) {
+    overCard.classList.add('seq-drag-over');
+  }
+}
+
+function seqTouchEnd(e) {
+  e.preventDefault();
+  if (!seqDragTouchEl) return;
+  const touch = e.changedTouches[0];
+  const target = document.elementFromPoint(touch.clientX, touch.clientY);
+  const overCard = target ? target.closest('.seq-card') : null;
+  if (overCard && overCard !== seqDragTouchEl) {
+    const toIdx = parseInt(overCard.dataset.seqIdx);
+    if (seqDragSrcIdx !== null && seqDragSrcIdx !== toIdx) {
+      reorderGameCall(seqDragSrcIdx, toIdx);
+    }
+  }
+  document.querySelectorAll('.seq-card').forEach(c => {
+    c.classList.remove('seq-dragging');
+    c.classList.remove('seq-drag-over');
+  });
+  seqDragTouchEl = null;
+  seqDragSrcIdx = null;
+}
+
+function reorderGameCall(fromIdx, toIdx) {
+  const game = games.find(g => g.id === activeGameId);
+  if (!game) return;
+  const [moved] = game.calls.splice(fromIdx, 1);
+  game.calls.splice(toIdx, 0, moved);
+  renderActiveGame();
+  saveGames();
 }
 
 function showGamePlayDetail(idx) {
