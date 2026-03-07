@@ -487,6 +487,8 @@
     font-size:12px; font-weight:800; color:var(--accent); flex-shrink:0;
   }
   .seq-pick-name { font-size:14px; font-weight:500; }
+  .seq-thumb { width:44px; height:44px; border-radius:6px; object-fit:cover; flex-shrink:0; background:var(--surface2); }
+  .seq-pick-thumb { width:36px; height:36px; border-radius:6px; object-fit:cover; flex-shrink:0; background:var(--surface2); }
   .seq-detail-back {
     display:flex; align-items:center; gap:8px; padding:12px 16px;
     background:var(--surface); border-bottom:1px solid var(--border);
@@ -1504,6 +1506,19 @@ function posDot(pos) {
   const p = posColors[pos];
   if (!p) return '';
   return '<span class="pos-dot' + (p.shape === 'square' ? ' square' : '') + '" style="background:' + p.color + '"></span>';
+}
+function playDiagramSrc(play) {
+  if (!play) return null;
+  if (play.customDiagram) {
+    const m = play.customDiagram.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
+    return 'data:' + m + ';base64,' + play.customDiagram;
+  }
+  const b = diagrams[play.type];
+  if (b) {
+    const m = b.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
+    return 'data:' + m + ';base64,' + b;
+  }
+  return null;
 }
 function posTag(pos) {
   const p = posColors[pos];
@@ -2983,8 +2998,10 @@ function renderActiveGame() {
       const assigned = positions.filter(pos => c[pos]).map(pos => pos + ':' + c[pos]);
       const playerSummary = assigned.length > 0 ? assigned.join(' · ') : 'No players assigned';
       const resultClass = c.result === 'SUCCESS' ? 'seq-success' : c.result === 'FAIL' ? 'seq-fail' : '';
+      const thumbSrc = playDiagramSrc(play);
       html += `<div class="seq-card ${resultClass}">
         <div class="seq-order">${i + 1}</div>
+        ${thumbSrc ? `<img class="seq-thumb" src="${thumbSrc}" alt="" onclick="showGamePlayDetail(${i})">` : ''}
         <div class="seq-info" onclick="showGamePlayDetail(${i})">
           <div class="seq-name">${name}</div>
           <div class="seq-players">${playerSummary}</div>
@@ -3016,8 +3033,10 @@ function showAddGamePlay() {
   let html = '<div class="picker-title"><h3>Add Play to Sequence</h3></div>';
   html += '<div class="seq-play-picker">';
   plays.forEach(p => {
+    const pThumb = playDiagramSrc(p);
     html += `<div class="seq-pick-item" onclick="addGamePlay(${p.num})">
       <div class="seq-pick-num">${p.num}</div>
+      ${pThumb ? `<img class="seq-pick-thumb" src="${pThumb}" alt="">` : ''}
       <div class="seq-pick-name">${p.type}</div></div>`;
   });
   html += '</div>';
