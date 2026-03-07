@@ -3909,7 +3909,7 @@ async function callAI(systemPrompt, userMessage) {
     const proxyUrl = settings.proxyUrl || SUPABASE_URL + '/functions/v1/ai-proxy';
     const resp = await fetch(proxyUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
       body: JSON.stringify({
         provider: 'anthropic',
         model: settings.anthropic.model || 'claude-sonnet-4-6',
@@ -3951,32 +3951,20 @@ async function callAI(systemPrompt, userMessage) {
     if (useThinking) reqBody.think = true;
     let resp;
     if (settings.ollama.apiKey) {
-      // Cloud mode: call Ollama cloud API directly
+      // Cloud mode: route through Supabase edge function proxy (Ollama cloud blocks browser CORS)
       const isLocalEndpoint = !endpoint || endpoint.includes('localhost') || endpoint.includes('127.0.0.1');
       const cloudEndpoint = isLocalEndpoint ? 'https://ollama.com' : endpoint.replace(/\/+$/, '');
-      const cloudUrl = new URL('/api/chat', cloudEndpoint).href;
-      const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + settings.ollama.apiKey };
-      try {
-        resp = await fetch(cloudUrl, {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify(reqBody)
-        });
-      } catch(directErr) {
-        // CORS blocked — fall back to proxy
-        console.warn('Direct Ollama cloud call failed, trying proxy:', directErr.message);
-        const proxyUrl = settings.proxyUrl || SUPABASE_URL + '/functions/v1/ai-proxy';
-        resp = await fetch(proxyUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            provider: 'ollama',
-            apiKey: settings.ollama.apiKey,
-            endpoint: cloudEndpoint,
-            ollamaBody: reqBody
-          })
-        });
-      }
+      const proxyUrl = settings.proxyUrl || SUPABASE_URL + '/functions/v1/ai-proxy';
+      resp = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
+        body: JSON.stringify({
+          provider: 'ollama',
+          apiKey: settings.ollama.apiKey,
+          endpoint: cloudEndpoint,
+          ollamaBody: reqBody
+        })
+      });
     } else {
       // Local mode: direct call to Ollama instance
       resp = await fetch(endpoint + '/api/chat', {
