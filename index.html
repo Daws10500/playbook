@@ -962,6 +962,20 @@
     width:20px; height:20px; border-radius:50%; background:var(--accent);
     cursor:pointer; border:2px solid var(--surface); box-shadow:0 1px 4px rgba(0,0,0,0.2);
   }
+  .ai-detect-btn {
+    width:100%; margin:8px 0; padding:10px; border-radius:8px; border:1px solid var(--accent);
+    background:transparent; color:var(--accent); font-size:13px; font-weight:700;
+    cursor:pointer; transition:all .15s;
+  }
+  .ai-detect-btn:active { background:var(--accent); color:#fff; transform:scale(0.97); }
+  .ai-detect-btn:disabled { opacity:0.5; cursor:not-allowed; }
+  .ai-local-info {
+    font-size:12px; color:var(--text2); margin:4px 0 12px; padding:8px; line-height:1.6;
+    background:var(--surface); border-radius:6px; border:1px solid var(--border);
+  }
+  .ai-local-info code {
+    background:var(--border); padding:2px 6px; border-radius:4px; font-size:11px;
+  }
 </style>
 </head>
 <body>
@@ -3692,7 +3706,7 @@ const ANTHROPIC_MODELS = [
   {id:'claude-sonnet-4-6', name:'Claude Sonnet 4.6'},
   {id:'claude-haiku-4-5-20251001', name:'Claude Haiku 4.5'}
 ];
-const OLLAMA_DEFAULT_MODELS = [
+const OLLAMA_CLOUD_MODELS = [
   {
     id: 'gemini-3-flash-preview:cloud',
     name: 'Gemini 3 Flash Preview',
@@ -3721,25 +3735,67 @@ const OLLAMA_DEFAULT_MODELS = [
     description: 'Qwen — fast coding agent, non-thinking only, 256K context'
   }
 ];
+const OLLAMA_LOCAL_RECOMMENDED = [
+  { id: 'qwen3:14b', name: 'Qwen3 14B', description: 'Strong reasoning, good for play generation' },
+  { id: 'mistral-small', name: 'Mistral Small', description: 'Fast and capable, low resource usage' },
+  { id: 'gemma3:12b', name: 'Gemma3 12B', description: 'Google model, solid all-around performance' }
+];
 let aiMode = 'existing'; // 'existing' or 'suggest'
 let aiCurrentResult = null;
 
-function loadOllamaModels() {
+function loadOllamaCloudModels() {
   try {
-    const s = localStorage.getItem('playbook_ollama_models');
+    // Try new key first, fall back to old key for migration
+    const s = localStorage.getItem('playbook_ollama_cloud_models') || localStorage.getItem('playbook_ollama_models');
     if (s) {
       const saved = JSON.parse(s);
-      // Merge with defaults so new built-in models are always present
       const ids = new Set(saved.map(m => m.id));
-      OLLAMA_DEFAULT_MODELS.forEach(m => { if (!ids.has(m.id)) saved.push(m); });
+      OLLAMA_CLOUD_MODELS.forEach(m => { if (!ids.has(m.id)) saved.push(m); });
       return saved;
     }
   } catch(e) {}
-  return [...OLLAMA_DEFAULT_MODELS];
+  return [...OLLAMA_CLOUD_MODELS];
 }
 
-function saveOllamaModels(models) {
-  localStorage.setItem('playbook_ollama_models', JSON.stringify(models));
+function saveOllamaCloudModels(models) {
+  localStorage.setItem('playbook_ollama_cloud_models', JSON.stringify(models));
+}
+
+function loadOllamaLocalModels() {
+  try {
+    const s = localStorage.getItem('playbook_ollama_local_models');
+    if (s) return JSON.parse(s);
+  } catch(e) {}
+  return [];
+}
+
+function saveOllamaLocalModels(models) {
+  localStorage.setItem('playbook_ollama_local_models', JSON.stringify(models));
+}
+
+async function detectOllamaLocalModels(endpoint) {
+  try {
+    const resp = await fetch(endpoint + '/api/tags', { signal: AbortSignal.timeout(5000) });
+    if (!resp.ok) return { ok: false, models: [], error: 'Ollama returned status ' + resp.status };
+    const data = await resp.json();
+    const models = (data.models || []).map(m => ({
+      id: m.name,
+      name: m.name,
+      size: m.size || 0,
+      parameterSize: m.details && m.details.parameter_size || '',
+      quantization: m.details && m.details.quantization_level || ''
+    }));
+    return { ok: true, models, error: null };
+  } catch(e) {
+    return { ok: false, models: [], error: e.message || 'Could not connect to Ollama' };
+  }
+}
+
+function formatModelSize(bytes) {
+  if (!bytes) return '';
+  if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
+  if (bytes >= 1e6) return (bytes / 1e6).toFixed(0) + ' MB';
+  return bytes + ' B';
 }
 
 function loadAISettings() {
@@ -3747,12 +3803,24 @@ function loadAISettings() {
     const s = localStorage.getItem('playbook_ai_settings');
     if (s) {
       const parsed = JSON.parse(s);
-      // Migrate old ollama settings that lack new fields
-      if (parsed.ollama && !('thinking' in parsed.ollama)) {
-        const card = loadOllamaModels().find(m => m.id === parsed.ollama.model);
-        parsed.ollama.thinking = card ? card.supportsThinking : false;
-        parsed.ollama.temperature = card ? card.defaultTemperature : 0.7;
-        parsed.ollama.numCtx = card ? card.defaultNumCtx : 8192;
+      // Migrate old 'ollama' provider to 'ollama-cloud'
+      if (parsed.provider === 'ollama') {
+        parsed.provider = 'ollama-cloud';
+      }
+      if (parsed.ollama && !parsed.ollamaCloud) {
+        parsed.ollamaCloud = { ...parsed.ollama };
+        delete parsed.ollama;
+      }
+      // Migrate old ollamaCloud settings that lack new fields
+      if (parsed.ollamaCloud && !('thinking' in parsed.ollamaCloud)) {
+        const card = loadOllamaCloudModels().find(m => m.id === parsed.ollamaCloud.model);
+        parsed.ollamaCloud.thinking = card ? card.supportsThinking : false;
+        parsed.ollamaCloud.temperature = card ? card.defaultTemperature : 0.7;
+        parsed.ollamaCloud.numCtx = card ? card.defaultNumCtx : 8192;
+      }
+      // Ensure ollamaLocal defaults exist
+      if (!parsed.ollamaLocal) {
+        parsed.ollamaLocal = { endpoint: 'http://localhost:11434', model: '', temperature: 0.7, numCtx: 4096 };
       }
       return parsed;
     }
@@ -3760,7 +3828,8 @@ function loadAISettings() {
   return {
     provider: 'anthropic',
     anthropic: { apiKey: '', model: 'claude-sonnet-4-6' },
-    ollama: { endpoint: 'http://localhost:11434', apiKey: '', model: 'gemini-3-flash-preview:cloud', thinking: true, temperature: 0.7, numCtx: 8192 },
+    ollamaCloud: { endpoint: 'http://localhost:11434', apiKey: '', model: 'gemini-3-flash-preview:cloud', thinking: true, temperature: 0.7, numCtx: 8192 },
+    ollamaLocal: { endpoint: 'http://localhost:11434', model: '', temperature: 0.7, numCtx: 4096 },
     proxyUrl: SUPABASE_URL + '/functions/v1/ai-proxy'
   };
 }
@@ -4069,6 +4138,97 @@ Generate a strategic play block of 3-5 plays to attack this ${defense} defense.$
   return { systemPrompt, userMessage };
 }
 
+function parseOllamaResponse(respText) {
+  let data;
+  try { data = JSON.parse(respText); } catch(e) {
+    throw new Error('AI_RAW:Ollama API returned non-JSON: ' + respText.slice(0, 300));
+  }
+  if (data.error) throw new Error(typeof data.error === 'string' ? data.error : (data.error.message || JSON.stringify(data.error)));
+  if (data.message) {
+    if (data.message.content && data.message.content.trim()) return data.message.content;
+    if (data.message.thinking && data.message.thinking.trim()) return data.message.thinking;
+  }
+  console.error('Unexpected Ollama response:', data);
+  throw new Error('Unexpected Ollama response format');
+}
+
+async function callOllamaCloud(systemPrompt, userMessage, settings) {
+  const endpoint = settings.ollamaCloud.endpoint || 'http://localhost:11434';
+  const modelId = settings.ollamaCloud.model || 'gemini-3-flash-preview:cloud';
+  const modelCard = loadOllamaCloudModels().find(m => m.id === modelId);
+  const useThinking = modelCard && modelCard.supportsThinking && settings.ollamaCloud.thinking;
+  const reqBody = {
+    model: modelId,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage }
+    ],
+    stream: false,
+    format: 'json',
+    options: {
+      temperature: settings.ollamaCloud.temperature != null ? settings.ollamaCloud.temperature : 0.7,
+      num_ctx: settings.ollamaCloud.numCtx || 8192
+    }
+  };
+  if (useThinking) reqBody.think = true;
+  // Cloud mode: route through Supabase edge function proxy (Ollama cloud blocks browser CORS)
+  const isLocalEndpoint = !endpoint || endpoint.includes('localhost') || endpoint.includes('127.0.0.1');
+  const cloudEndpoint = isLocalEndpoint ? 'https://ollama.com' : endpoint.replace(/\/+$/, '');
+  const proxyUrl = settings.proxyUrl || SUPABASE_URL + '/functions/v1/ai-proxy';
+  const resp = await fetch(proxyUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
+    body: JSON.stringify({
+      provider: 'ollama',
+      apiKey: settings.ollamaCloud.apiKey,
+      endpoint: cloudEndpoint,
+      ollamaBody: reqBody
+    })
+  });
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '');
+    console.error('Ollama Cloud response status:', resp.status, 'body:', errText);
+    if (resp.status === 401 || resp.status === 403) throw new Error('Ollama API key is invalid or expired. Check your key in AI Settings.');
+    throw new Error('Ollama Cloud error (' + resp.status + '): ' + (errText || 'Unknown error'));
+  }
+  return parseOllamaResponse(await resp.text());
+}
+
+async function callOllamaLocal(systemPrompt, userMessage, settings) {
+  const endpoint = settings.ollamaLocal.endpoint || 'http://localhost:11434';
+  const modelId = settings.ollamaLocal.model;
+  if (!modelId) throw new Error('No local model selected. Open AI Settings and detect your installed models.');
+  const reqBody = {
+    model: modelId,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage }
+    ],
+    stream: false,
+    format: 'json',
+    options: {
+      temperature: settings.ollamaLocal.temperature != null ? settings.ollamaLocal.temperature : 0.7,
+      num_ctx: settings.ollamaLocal.numCtx || 4096
+    }
+  };
+  let resp;
+  try {
+    resp = await fetch(endpoint + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(reqBody)
+    });
+  } catch(e) {
+    throw new Error('Could not connect to Ollama at ' + endpoint + '. Is Ollama running? Start it with: ollama serve');
+  }
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '');
+    console.error('Ollama Local response status:', resp.status, 'body:', errText);
+    throw new Error('Ollama error (' + resp.status + '): ' + (errText || 'Is Ollama running at ' + endpoint + '?'));
+  }
+  return parseOllamaResponse(await resp.text());
+}
+
 async function callAI(systemPrompt, userMessage) {
   const settings = loadAISettings();
 
@@ -4098,72 +4258,10 @@ async function callAI(systemPrompt, userMessage) {
     if (data.content && data.content[0] && data.content[0].text) return data.content[0].text;
     if (data.error) throw new Error(data.error.message || data.error);
     throw new Error('Unexpected API response format');
-  } else if (settings.provider === 'ollama') {
-    const endpoint = settings.ollama.endpoint || 'http://localhost:11434';
-    const modelId = settings.ollama.model || 'gemini-3-flash-preview';
-    const modelCard = loadOllamaModels().find(m => m.id === modelId);
-    const useThinking = modelCard && modelCard.supportsThinking && settings.ollama.thinking;
-    const reqBody = {
-      model: modelId,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage }
-      ],
-      stream: false,
-      format: 'json',
-      options: {
-        temperature: settings.ollama.temperature != null ? settings.ollama.temperature : 0.7,
-        num_ctx: settings.ollama.numCtx || 8192
-      }
-    };
-    if (useThinking) reqBody.think = true;
-    let resp;
-    if (settings.ollama.apiKey) {
-      // Cloud mode: route through Supabase edge function proxy (Ollama cloud blocks browser CORS)
-      const isLocalEndpoint = !endpoint || endpoint.includes('localhost') || endpoint.includes('127.0.0.1');
-      const cloudEndpoint = isLocalEndpoint ? 'https://ollama.com' : endpoint.replace(/\/+$/, '');
-      const proxyUrl = settings.proxyUrl || SUPABASE_URL + '/functions/v1/ai-proxy';
-      resp = await fetch(proxyUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
-        body: JSON.stringify({
-          provider: 'ollama',
-          apiKey: settings.ollama.apiKey,
-          endpoint: cloudEndpoint,
-          ollamaBody: reqBody
-        })
-      });
-    } else {
-      // Local mode: direct call to Ollama instance
-      resp = await fetch(endpoint + '/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reqBody)
-      });
-    }
-    if (!resp.ok) {
-      const errText = await resp.text().catch(() => '');
-      console.error('Ollama response status:', resp.status, 'body:', errText);
-      if (resp.status === 401 || resp.status === 403) throw new Error('Ollama API key is invalid or expired. Check your key in AI Settings.');
-      throw new Error('Ollama error (' + resp.status + '): ' + (errText || 'Is Ollama running at ' + endpoint + '?'));
-    }
-    const respText = await resp.text();
-    let data;
-    try { data = JSON.parse(respText); } catch(e) {
-      throw new Error('AI_RAW:Ollama API returned non-JSON: ' + respText.slice(0, 300));
-    }
-    if (data.error) throw new Error(typeof data.error === 'string' ? data.error : (data.error.message || JSON.stringify(data.error)));
-    if (data.message) {
-      // When thinking is enabled, actual content may be empty string while thinking has reasoning
-      // Prefer content if it has substance; fall back to thinking only if content is truly empty
-      if (data.message.content && data.message.content.trim()) return data.message.content;
-      if (data.message.thinking && data.message.thinking.trim()) {
-        // Thinking output is reasoning, not JSON — try to extract JSON from it
-        return data.message.thinking;
-      }
-    }
-    console.error('Unexpected Ollama response:', data);
-    throw new Error('Unexpected Ollama response format');
+  } else if (settings.provider === 'ollama-cloud') {
+    return callOllamaCloud(systemPrompt, userMessage, settings);
+  } else if (settings.provider === 'ollama-local') {
+    return callOllamaLocal(systemPrompt, userMessage, settings);
   } else {
     throw new Error('Unknown AI provider: ' + settings.provider);
   }
@@ -4178,7 +4276,8 @@ function renderAI() {
   let html = '<div class="ai-header"><h3>AI Play Generator</h3>';
   html += '<button class="ai-settings-btn" onclick="showAISettings()" title="AI Settings">&#9881;</button></div>';
 
-  if (!navigator.onLine) {
+  const isLocalProvider = settings.provider === 'ollama-local';
+  if (!navigator.onLine && !isLocalProvider) {
     html += '<div class="ai-offline-msg"><div class="icon">&#128268;</div><div class="text">You\'re offline. AI generation requires an internet connection.</div></div>';
     if (history.length > 0) {
       html += '<div class="ai-history-section"><h4>Cached Results</h4></div>';
@@ -4195,19 +4294,30 @@ function renderAI() {
   }
 
   // Provider status
-  const hasKey = settings.provider === 'anthropic' ? !!settings.anthropic.apiKey : true;
+  let disableGenerate = false;
   html += '<div style="padding:0 16px 8px;font-size:12px;color:var(--text2);">';
   if (settings.provider === 'anthropic') {
     const aModel = ANTHROPIC_MODELS.find(m => m.id === settings.anthropic.model);
     html += 'Provider: <strong>Claude</strong>';
     if (aModel) html += ' &mdash; ' + aModel.name;
-    if (!hasKey) html += ' <span style="color:var(--red);">(no API key)</span>';
-  } else {
-    const oCard = loadOllamaModels().find(m => m.id === settings.ollama.model);
-    const modelName = oCard ? oCard.name : settings.ollama.model;
-    const thinkLabel = oCard && oCard.supportsThinking ? (settings.ollama.thinking ? 'thinking ON' : 'thinking OFF') : 'no thinking';
-    const ctxLabel = (settings.ollama.numCtx || 8192) >= 1024 ? ((settings.ollama.numCtx || 8192) / 1024) + 'K ctx' : (settings.ollama.numCtx || 8192) + ' ctx';
-    html += 'Provider: <strong>Ollama</strong> &mdash; ' + modelName + ' (' + thinkLabel + ', ' + ctxLabel + ', temp ' + (settings.ollama.temperature != null ? settings.ollama.temperature : 0.7) + ')';
+    if (!settings.anthropic.apiKey) { html += ' <span style="color:var(--red);">(no API key)</span>'; disableGenerate = true; }
+  } else if (settings.provider === 'ollama-cloud') {
+    const oCard = loadOllamaCloudModels().find(m => m.id === settings.ollamaCloud.model);
+    const modelName = oCard ? oCard.name : settings.ollamaCloud.model;
+    const thinkLabel = oCard && oCard.supportsThinking ? (settings.ollamaCloud.thinking ? 'thinking ON' : 'thinking OFF') : 'no thinking';
+    const ctxLabel = (settings.ollamaCloud.numCtx || 8192) >= 1024 ? ((settings.ollamaCloud.numCtx || 8192) / 1024) + 'K ctx' : (settings.ollamaCloud.numCtx || 8192) + ' ctx';
+    html += 'Provider: <strong>Ollama Cloud</strong> &mdash; ' + modelName + ' (' + thinkLabel + ', ' + ctxLabel + ', temp ' + (settings.ollamaCloud.temperature != null ? settings.ollamaCloud.temperature : 0.7) + ')';
+    if (!settings.ollamaCloud.apiKey) { html += ' <span style="color:var(--red);">(no API key)</span>'; disableGenerate = true; }
+  } else if (settings.provider === 'ollama-local') {
+    const localModel = settings.ollamaLocal.model;
+    html += 'Provider: <strong>Ollama Local</strong>';
+    if (localModel) {
+      const ctxLabel = (settings.ollamaLocal.numCtx || 4096) >= 1024 ? ((settings.ollamaLocal.numCtx || 4096) / 1024) + 'K ctx' : (settings.ollamaLocal.numCtx || 4096) + ' ctx';
+      html += ' &mdash; ' + localModel + ' (' + ctxLabel + ', temp ' + (settings.ollamaLocal.temperature != null ? settings.ollamaLocal.temperature : 0.7) + ')';
+    } else {
+      html += ' <span style="color:var(--red);">(no model selected)</span>';
+      disableGenerate = true;
+    }
   }
   html += '</div>';
 
@@ -4243,7 +4353,7 @@ function renderAI() {
   html += '</select></div>';
 
   // Generate button
-  html += '<button class="ai-generate-btn" onclick="generatePlayBlock()"' + (!hasKey && settings.provider === 'anthropic' ? ' disabled' : '') + '>Generate Play Block</button>';
+  html += '<button class="ai-generate-btn" onclick="generatePlayBlock()"' + (disableGenerate ? ' disabled' : '') + '>Generate Play Block</button>';
 
   // Results area
   html += '<div id="aiResultsArea"></div>';
@@ -4954,19 +5064,23 @@ async function generatePlayBlock() {
   const gameId = gameSelect ? gameSelect.value : '__none__';
 
   if (!defense) { showAIError('Please select a defensive scheme.'); return; }
-  if (!navigator.onLine) { showAIError('You are offline. AI generation requires an internet connection.'); return; }
 
   const settings = loadAISettings();
+  if (!navigator.onLine && settings.provider !== 'ollama-local') {
+    showAIError('You are offline. AI generation requires an internet connection.');
+    return;
+  }
   if (settings.provider === 'anthropic' && !settings.anthropic.apiKey) {
     showAIError('No API key configured. Tap the gear icon to set up your Anthropic API key.');
     return;
   }
-  if (settings.provider === 'ollama' && !settings.ollama.apiKey) {
-    const modelId = settings.ollama.model || '';
-    if (modelId.endsWith(':cloud') || !modelId) {
-      showAIError('No Ollama API key configured. Tap the gear icon to add your Ollama cloud API key.');
-      return;
-    }
+  if (settings.provider === 'ollama-cloud' && !settings.ollamaCloud.apiKey) {
+    showAIError('No Ollama Cloud API key configured. Tap the gear icon to add your API key.');
+    return;
+  }
+  if (settings.provider === 'ollama-local' && !settings.ollamaLocal.model) {
+    showAIError('No local model selected. Tap the gear icon and click "Detect Models" to find installed models.');
+    return;
   }
 
   showAILoading();
@@ -5149,7 +5263,8 @@ function showAISettings() {
   html += '<label>Provider</label>';
   html += '<select id="aiSettingsProvider" onchange="toggleAISettingsFields()">';
   html += '<option value="anthropic"' + (settings.provider === 'anthropic' ? ' selected' : '') + '>Anthropic (Claude)</option>';
-  html += '<option value="ollama"' + (settings.provider === 'ollama' ? ' selected' : '') + '>Ollama (Local)</option>';
+  html += '<option value="ollama-cloud"' + (settings.provider === 'ollama-cloud' ? ' selected' : '') + '>Ollama Cloud</option>';
+  html += '<option value="ollama-local"' + (settings.provider === 'ollama-local' ? ' selected' : '') + '>Ollama (Local)</option>';
   html += '</select>';
 
   // Anthropic fields
@@ -5166,49 +5281,99 @@ function showAISettings() {
   html += '<input type="text" id="aiSettingsProxy" value="' + (settings.proxyUrl || SUPABASE_URL + '/functions/v1/ai-proxy') + '" placeholder="Edge function URL">';
   html += '</div>';
 
-  // Ollama fields
-  const ollamaModels = loadOllamaModels();
-  const selectedCard = ollamaModels.find(m => m.id === settings.ollama.model) || ollamaModels[0];
-  html += '<div id="aiSettingsOllama" style="' + (settings.provider !== 'ollama' ? 'display:none;' : '') + '">';
+  // Ollama Cloud fields
+  const ollamaCloudModels = loadOllamaCloudModels();
+  const selectedCloudCard = ollamaCloudModels.find(m => m.id === settings.ollamaCloud.model) || ollamaCloudModels[0];
+  html += '<div id="aiSettingsOllamaCloud" style="' + (settings.provider !== 'ollama-cloud' ? 'display:none;' : '') + '">';
   html += '<label>Endpoint</label>';
-  html += '<input type="text" id="aiSettingsEndpoint" value="' + (settings.ollama.endpoint || 'http://localhost:11434') + '">';
+  html += '<input type="text" id="aiSettingsCloudEndpoint" value="' + (settings.ollamaCloud.endpoint || 'http://localhost:11434') + '">';
   html += '<label>API Key</label>';
-  html += '<input type="password" id="aiSettingsOllamaKey" value="' + (settings.ollama.apiKey || '') + '" placeholder="Optional — for cloud Ollama">';
+  html += '<input type="password" id="aiSettingsCloudKey" value="' + (settings.ollamaCloud.apiKey || '') + '" placeholder="Ollama cloud API key">';
 
-  // Model dropdown
   html += '<label>Model</label>';
-  html += '<select id="aiSettingsOllamaModel" onchange="onOllamaModelChange()">';
-  ollamaModels.forEach(m => {
-    html += '<option value="' + m.id + '"' + (settings.ollama.model === m.id ? ' selected' : '') + '>' + m.name + '</option>';
+  html += '<select id="aiSettingsCloudModel" onchange="onOllamaCloudModelChange()">';
+  ollamaCloudModels.forEach(m => {
+    html += '<option value="' + m.id + '"' + (settings.ollamaCloud.model === m.id ? ' selected' : '') + '>' + m.name + '</option>';
   });
   html += '</select>';
-  html += '<div id="ollamaModelDesc" class="ai-model-desc">' + selectedCard.description + '</div>';
+  html += '<div id="ollamaCloudModelDesc" class="ai-model-desc">' + selectedCloudCard.description + '</div>';
 
   // Thinking toggle
   html += '<div class="ai-thinking-toggle">';
   html += '<label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:14px;cursor:pointer;">';
-  html += '<input type="checkbox" id="aiSettingsThinking"' + (settings.ollama.thinking && selectedCard.supportsThinking ? ' checked' : '') + (selectedCard.supportsThinking ? '' : ' disabled') + '>';
+  html += '<input type="checkbox" id="aiSettingsCloudThinking"' + (settings.ollamaCloud.thinking && selectedCloudCard.supportsThinking ? ' checked' : '') + (selectedCloudCard.supportsThinking ? '' : ' disabled') + '>';
   html += '<span>Enable Thinking</span>';
-  html += '<span id="aiThinkingStatus" style="font-size:12px;color:var(--text2);">' + (selectedCard.supportsThinking ? '' : '(not supported)') + '</span>';
+  html += '<span id="aiCloudThinkingStatus" style="font-size:12px;color:var(--text2);">' + (selectedCloudCard.supportsThinking ? '' : '(not supported)') + '</span>';
   html += '</label></div>';
 
   // Temperature slider
-  html += '<label>Temperature <span id="aiTempValue" style="font-weight:400;color:var(--accent);">' + (settings.ollama.temperature != null ? settings.ollama.temperature : selectedCard.defaultTemperature) + '</span></label>';
-  html += '<input type="range" id="aiSettingsTemp" class="ai-temp-slider" min="0" max="1.5" step="0.1" value="' + (settings.ollama.temperature != null ? settings.ollama.temperature : selectedCard.defaultTemperature) + '" oninput="document.getElementById(\'aiTempValue\').textContent=this.value">';
+  html += '<label>Temperature <span id="aiCloudTempValue" style="font-weight:400;color:var(--accent);">' + (settings.ollamaCloud.temperature != null ? settings.ollamaCloud.temperature : selectedCloudCard.defaultTemperature) + '</span></label>';
+  html += '<input type="range" id="aiSettingsCloudTemp" class="ai-temp-slider" min="0" max="1.5" step="0.1" value="' + (settings.ollamaCloud.temperature != null ? settings.ollamaCloud.temperature : selectedCloudCard.defaultTemperature) + '" oninput="document.getElementById(\'aiCloudTempValue\').textContent=this.value">';
 
   // Context length selector
-  const ctxOptions = [2048, 4096, 8192, 16384, 32768, 65536, 131072];
-  const currentCtx = settings.ollama.numCtx || selectedCard.defaultNumCtx;
+  const cloudCtxOptions = [2048, 4096, 8192, 16384, 32768, 65536, 131072];
+  const currentCloudCtx = settings.ollamaCloud.numCtx || selectedCloudCard.defaultNumCtx;
   html += '<label>Context Length</label>';
-  html += '<select id="aiSettingsCtx">';
-  ctxOptions.forEach(v => {
-    if (v <= selectedCard.contextWindow) {
+  html += '<select id="aiSettingsCloudCtx">';
+  cloudCtxOptions.forEach(v => {
+    if (v <= selectedCloudCard.contextWindow) {
       const label = v >= 1024 ? (v / 1024) + 'K' : v;
-      html += '<option value="' + v + '"' + (currentCtx === v ? ' selected' : '') + '>' + label + ' tokens</option>';
+      html += '<option value="' + v + '"' + (currentCloudCtx === v ? ' selected' : '') + '>' + label + ' tokens</option>';
     }
   });
   html += '</select>';
+  html += '</div>';
 
+  // Ollama Local fields
+  const localModels = loadOllamaLocalModels();
+  html += '<div id="aiSettingsOllamaLocal" style="' + (settings.provider !== 'ollama-local' ? 'display:none;' : '') + '">';
+  html += '<label>Endpoint</label>';
+  html += '<input type="text" id="aiSettingsLocalEndpoint" value="' + (settings.ollamaLocal.endpoint || 'http://localhost:11434') + '">';
+
+  // Detect button
+  html += '<button class="ai-detect-btn" onclick="detectLocalModels()">Detect Models</button>';
+
+  // Model dropdown
+  html += '<label>Model</label>';
+  html += '<select id="aiSettingsLocalModel" onchange="onOllamaLocalModelChange()">';
+  if (localModels.length === 0) {
+    html += '<option value="">-- No models detected --</option>';
+  } else {
+    html += '<option value="">-- Select a model --</option>';
+    localModels.forEach(m => {
+      const sizeInfo = m.parameterSize ? ' (' + m.parameterSize + ')' : (m.size ? ' (' + formatModelSize(m.size) + ')' : '');
+      html += '<option value="' + m.id + '"' + (settings.ollamaLocal.model === m.id ? ' selected' : '') + '>' + m.name + sizeInfo + '</option>';
+    });
+  }
+  html += '</select>';
+
+  // Model info area
+  html += '<div id="ollamaLocalInfo" class="ai-local-info">';
+  if (localModels.length === 0) {
+    html += 'Click <strong>Detect Models</strong> to find models installed on your machine.<br><br>';
+    html += 'Recommended models to install:<br>';
+    OLLAMA_LOCAL_RECOMMENDED.forEach(m => {
+      html += '<code>ollama pull ' + m.id + '</code> &mdash; ' + m.description + '<br>';
+    });
+  } else {
+    html += localModels.length + ' model' + (localModels.length !== 1 ? 's' : '') + ' detected on your machine.';
+  }
+  html += '</div>';
+
+  // Temperature slider
+  html += '<label>Temperature <span id="aiLocalTempValue" style="font-weight:400;color:var(--accent);">' + (settings.ollamaLocal.temperature != null ? settings.ollamaLocal.temperature : 0.7) + '</span></label>';
+  html += '<input type="range" id="aiSettingsLocalTemp" class="ai-temp-slider" min="0" max="1.5" step="0.1" value="' + (settings.ollamaLocal.temperature != null ? settings.ollamaLocal.temperature : 0.7) + '" oninput="document.getElementById(\'aiLocalTempValue\').textContent=this.value">';
+
+  // Context length selector
+  const localCtxOptions = [2048, 4096, 8192, 16384, 32768];
+  const currentLocalCtx = settings.ollamaLocal.numCtx || 4096;
+  html += '<label>Context Length</label>';
+  html += '<select id="aiSettingsLocalCtx">';
+  localCtxOptions.forEach(v => {
+    const label = v >= 1024 ? (v / 1024) + 'K' : v;
+    html += '<option value="' + v + '"' + (currentLocalCtx === v ? ' selected' : '') + '>' + label + ' tokens</option>';
+  });
+  html += '</select>';
   html += '</div>';
 
   html += '<button class="ai-settings-save" onclick="saveAISettingsFromModal()">Save Settings</button>';
@@ -5218,26 +5383,22 @@ function showAISettings() {
   document.getElementById('modalOverlay').classList.add('active');
 }
 
-function onOllamaModelChange() {
-  const models = loadOllamaModels();
-  const sel = document.getElementById('aiSettingsOllamaModel').value;
+function onOllamaCloudModelChange() {
+  const models = loadOllamaCloudModels();
+  const sel = document.getElementById('aiSettingsCloudModel').value;
   const card = models.find(m => m.id === sel) || models[0];
 
-  // Update description
-  document.getElementById('ollamaModelDesc').textContent = card.description;
+  document.getElementById('ollamaCloudModelDesc').textContent = card.description;
 
-  // Update thinking toggle
-  const thinkCb = document.getElementById('aiSettingsThinking');
-  const thinkStatus = document.getElementById('aiThinkingStatus');
+  const thinkCb = document.getElementById('aiSettingsCloudThinking');
+  const thinkStatus = document.getElementById('aiCloudThinkingStatus');
   thinkCb.disabled = !card.supportsThinking;
   thinkCb.checked = card.supportsThinking;
   thinkStatus.textContent = card.supportsThinking ? '' : '(not supported)';
 
-  // Reset temperature to model default
-  document.getElementById('aiSettingsTemp').value = card.defaultTemperature;
-  document.getElementById('aiTempValue').textContent = card.defaultTemperature;
+  document.getElementById('aiSettingsCloudTemp').value = card.defaultTemperature;
+  document.getElementById('aiCloudTempValue').textContent = card.defaultTemperature;
 
-  // Update context options
   const ctxOptions = [2048, 4096, 8192, 16384, 32768, 65536, 131072];
   let ctxHtml = '';
   ctxOptions.forEach(v => {
@@ -5246,13 +5407,60 @@ function onOllamaModelChange() {
       ctxHtml += '<option value="' + v + '"' + (v === card.defaultNumCtx ? ' selected' : '') + '>' + label + ' tokens</option>';
     }
   });
-  document.getElementById('aiSettingsCtx').innerHTML = ctxHtml;
+  document.getElementById('aiSettingsCloudCtx').innerHTML = ctxHtml;
+}
+
+function onOllamaLocalModelChange() {
+  const sel = document.getElementById('aiSettingsLocalModel').value;
+  const info = document.getElementById('ollamaLocalInfo');
+  if (sel) {
+    info.textContent = 'Selected: ' + sel;
+  } else {
+    info.textContent = 'No model selected.';
+  }
+}
+
+async function detectLocalModels() {
+  const btn = document.querySelector('.ai-detect-btn');
+  const endpoint = document.getElementById('aiSettingsLocalEndpoint').value.trim() || 'http://localhost:11434';
+  btn.disabled = true;
+  btn.textContent = 'Detecting...';
+  const result = await detectOllamaLocalModels(endpoint);
+  btn.disabled = false;
+  btn.textContent = 'Detect Models';
+
+  const select = document.getElementById('aiSettingsLocalModel');
+  const info = document.getElementById('ollamaLocalInfo');
+
+  if (result.ok && result.models.length > 0) {
+    saveOllamaLocalModels(result.models);
+    let optHtml = '<option value="">-- Select a model --</option>';
+    result.models.forEach(m => {
+      const sizeInfo = m.parameterSize ? ' (' + m.parameterSize + ')' : (m.size ? ' (' + formatModelSize(m.size) + ')' : '');
+      optHtml += '<option value="' + m.id + '">' + m.name + sizeInfo + '</option>';
+    });
+    select.innerHTML = optHtml;
+    info.innerHTML = result.models.length + ' model' + (result.models.length !== 1 ? 's' : '') + ' detected on your machine.';
+  } else {
+    select.innerHTML = '<option value="">-- No models detected --</option>';
+    let infoHtml = '';
+    if (result.error) {
+      infoHtml += '<span style="color:var(--red);">' + result.error + '</span><br><br>';
+    }
+    infoHtml += 'Make sure Ollama is running: <code>ollama serve</code><br><br>';
+    infoHtml += 'Recommended models to install:<br>';
+    OLLAMA_LOCAL_RECOMMENDED.forEach(m => {
+      infoHtml += '<code>ollama pull ' + m.id + '</code> &mdash; ' + m.description + '<br>';
+    });
+    info.innerHTML = infoHtml;
+  }
 }
 
 function toggleAISettingsFields() {
   const provider = document.getElementById('aiSettingsProvider').value;
   document.getElementById('aiSettingsAnthropic').style.display = provider === 'anthropic' ? '' : 'none';
-  document.getElementById('aiSettingsOllama').style.display = provider === 'ollama' ? '' : 'none';
+  document.getElementById('aiSettingsOllamaCloud').style.display = provider === 'ollama-cloud' ? '' : 'none';
+  document.getElementById('aiSettingsOllamaLocal').style.display = provider === 'ollama-local' ? '' : 'none';
 }
 
 function saveAISettingsFromModal() {
@@ -5263,13 +5471,19 @@ function saveAISettingsFromModal() {
       apiKey: document.getElementById('aiSettingsApiKey').value.trim(),
       model: document.getElementById('aiSettingsModel').value
     },
-    ollama: {
-      endpoint: document.getElementById('aiSettingsEndpoint').value.trim(),
-      apiKey: document.getElementById('aiSettingsOllamaKey').value.trim(),
-      model: document.getElementById('aiSettingsOllamaModel').value,
-      thinking: document.getElementById('aiSettingsThinking').checked,
-      temperature: parseFloat(document.getElementById('aiSettingsTemp').value),
-      numCtx: parseInt(document.getElementById('aiSettingsCtx').value)
+    ollamaCloud: {
+      endpoint: document.getElementById('aiSettingsCloudEndpoint').value.trim(),
+      apiKey: document.getElementById('aiSettingsCloudKey').value.trim(),
+      model: document.getElementById('aiSettingsCloudModel').value,
+      thinking: document.getElementById('aiSettingsCloudThinking').checked,
+      temperature: parseFloat(document.getElementById('aiSettingsCloudTemp').value),
+      numCtx: parseInt(document.getElementById('aiSettingsCloudCtx').value)
+    },
+    ollamaLocal: {
+      endpoint: document.getElementById('aiSettingsLocalEndpoint').value.trim(),
+      model: document.getElementById('aiSettingsLocalModel').value,
+      temperature: parseFloat(document.getElementById('aiSettingsLocalTemp').value),
+      numCtx: parseInt(document.getElementById('aiSettingsLocalCtx').value)
     },
     proxyUrl: document.getElementById('aiSettingsProxy').value.trim()
   };
