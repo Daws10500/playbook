@@ -1164,7 +1164,8 @@ async function fullSync() {
       roster:   { get: () => localStorage.getItem('playbook_roster'),   set: v => { roster = JSON.parse(v); localStorage.setItem('playbook_roster', v); } },
       gamelogs: { get: () => localStorage.getItem('playbook_gamelogs'), set: v => { gameLogs = JSON.parse(v); localStorage.setItem('playbook_gamelogs', v); } },
       theme:    { get: () => localStorage.getItem('playbook_theme'),    set: v => { localStorage.setItem('playbook_theme', v); document.documentElement.setAttribute('data-theme', v); document.getElementById('themeBtn').innerHTML = v === 'light' ? '&#9728;&#65039;' : '&#127769;'; } },
-      ollama_models: { get: () => localStorage.getItem('playbook_ollama_models'), set: v => { localStorage.setItem('playbook_ollama_models', v); } },
+      ollama_cloud_models: { get: () => localStorage.getItem('playbook_ollama_cloud_models'), set: v => { localStorage.setItem('playbook_ollama_cloud_models', v); } },
+      ollama_local_models: { get: () => localStorage.getItem('playbook_ollama_local_models'), set: v => { localStorage.setItem('playbook_ollama_local_models', v); } },
       ai_settings:   { get: () => localStorage.getItem('playbook_ai_settings'),   set: v => { localStorage.setItem('playbook_ai_settings', v); } }
     };
 
@@ -1215,7 +1216,7 @@ async function initialMigration() {
   if (localStorage.getItem('playbook_sync_init')) return;
   if (!navigator.onLine) return;
   try {
-    const keyMap = { plays: 'playbook_plays', games: 'playbook_games', roster: 'playbook_roster', gamelogs: 'playbook_gamelogs', theme: 'playbook_theme' };
+    const keyMap = { plays: 'playbook_plays', games: 'playbook_games', roster: 'playbook_roster', gamelogs: 'playbook_gamelogs', theme: 'playbook_theme', ollama_cloud_models: 'playbook_ollama_cloud_models', ollama_local_models: 'playbook_ollama_local_models', ai_settings: 'playbook_ai_settings' };
     const syncMeta = {};
     for (const [sbKey, lsKey] of Object.entries(keyMap)) {
       const raw = localStorage.getItem(lsKey);
