@@ -3786,6 +3786,10 @@ function needsCorsConfig() {
 }
 
 async function detectOllamaLocalModels(endpoint) {
+  // Chrome Private Network Access blocks public HTTPS → localhost; no server-side fix exists
+  if (isLocalEndpoint(endpoint) && needsCorsConfig()) {
+    return { ok: false, models: [], error: 'Browser security (Private Network Access) blocks this site from reaching localhost.', isCors: true };
+  }
   try {
     const resp = await fetch(endpoint + '/api/tags', {
       signal: AbortSignal.timeout(5000),
@@ -3793,21 +3797,19 @@ async function detectOllamaLocalModels(endpoint) {
     });
     if (!resp.ok) return { ok: false, models: [], error: 'Ollama returned status ' + resp.status, isCors: false };
     const data = await resp.json();
-    const models = (data.models || []).map(m => ({
-      id: m.name,
-      name: m.name,
-      size: m.size || 0,
-      parameterSize: m.details && m.details.parameter_size || '',
-      quantization: m.details && m.details.quantization_level || ''
-    }));
+    // Filter out cloud models — those belong in Ollama Cloud provider
+    const models = (data.models || [])
+      .filter(m => !m.remote_model && !m.name.endsWith(':cloud'))
+      .map(m => ({
+        id: m.name,
+        name: m.name,
+        size: m.size || 0,
+        parameterSize: m.details && m.details.parameter_size || '',
+        quantization: m.details && m.details.quantization_level || ''
+      }));
     return { ok: true, models, error: null, isCors: false };
   } catch(e) {
-    // TypeError = network/CORS error; detect PNA block for localhost from public HTTPS
-    const isCors = e instanceof TypeError && isLocalEndpoint(endpoint) && needsCorsConfig();
-    const msg = isCors
-      ? 'Browser blocked access to localhost (CORS/Private Network Access).'
-      : (e.message || 'Could not connect to Ollama');
-    return { ok: false, models: [], error: msg, isCors };
+    return { ok: false, models: [], error: e.message || 'Could not connect to Ollama', isCors: false };
   }
 }
 
@@ -4240,7 +4242,7 @@ async function callOllamaLocal(systemPrompt, userMessage, settings) {
     });
   } catch(e) {
     if (e instanceof TypeError && isLocalEndpoint(endpoint) && needsCorsConfig()) {
-      throw new Error('Browser blocked access to Ollama (CORS). Configure Ollama with:\nOLLAMA_ORIGINS=' + location.origin + ' ollama serve');
+      throw new Error('Chrome blocks HTTPS sites from reaching localhost. Use Ollama Cloud provider, or serve the app locally (python3 -m http.server 8080).');
     }
     throw new Error('Could not connect to Ollama at ' + endpoint + '. Is Ollama running? Start it with: ollama serve');
   }
@@ -5374,9 +5376,12 @@ function showAISettings() {
   html += '<div id="ollamaLocalInfo" class="ai-local-info">';
   if (localModels.length === 0) {
     if (needsCorsConfig()) {
-      html += '<strong>Setup required:</strong> Ollama must allow this site. Start Ollama with:<br>';
-      html += '<code>OLLAMA_ORIGINS=' + location.origin + ' ollama serve</code><br><br>';
-      html += 'Then click <strong>Detect Models</strong> above.<br><br>';
+      html += '<strong>&#9888; Not available from this site.</strong><br><br>';
+      html += 'Chrome blocks HTTPS sites from reaching localhost (Private Network Access policy). ';
+      html += 'Ollama Local works when the app is served locally:<br>';
+      html += '<code>cd "Flag Football" && python3 -m http.server 8080</code><br>';
+      html += 'Then open <code>http://localhost:8080</code><br><br>';
+      html += 'From this site, use <strong>Ollama Cloud</strong> instead.<br>';
     } else {
       html += 'Click <strong>Detect Models</strong> to find models installed on your machine.<br><br>';
     }
@@ -5477,11 +5482,10 @@ async function detectLocalModels() {
       infoHtml += '<span style="color:var(--red);">' + result.error + '</span><br><br>';
     }
     if (result.isCors) {
-      infoHtml += '<strong>Fix:</strong> Ollama must allow this site\'s origin. Restart Ollama with:<br>';
-      infoHtml += '<code>OLLAMA_ORIGINS=' + location.origin + ' ollama serve</code><br><br>';
-      infoHtml += 'Or set it permanently:<br>';
-      infoHtml += '<code>launchctl setenv OLLAMA_ORIGINS "' + location.origin + '"</code><br>';
-      infoHtml += 'Then restart Ollama and click Detect Models again.<br>';
+      infoHtml += 'Chrome blocks HTTPS sites from reaching localhost (Private Network Access).<br><br>';
+      infoHtml += '<strong>Options:</strong><br>';
+      infoHtml += '&bull; Switch to <strong>Ollama Cloud</strong> provider (works from this site)<br>';
+      infoHtml += '&bull; Serve the app locally: <code>python3 -m http.server 8080</code><br>';
     } else {
       infoHtml += 'Make sure Ollama is running: <code>ollama serve</code><br><br>';
       infoHtml += 'Recommended models to install:<br>';
