@@ -6,7 +6,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PlayBook">
 <meta name="theme-color" content="#0f1117">
@@ -3773,10 +3773,25 @@ function saveOllamaLocalModels(models) {
   localStorage.setItem('playbook_ollama_local_models', JSON.stringify(models));
 }
 
+function isLocalEndpoint(endpoint) {
+  try {
+    const u = new URL(endpoint);
+    return u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '0.0.0.0';
+  } catch(e) { return false; }
+}
+
+function needsCorsConfig() {
+  // Public HTTPS origin trying to reach localhost = Chrome PNA will block
+  return location.protocol === 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
+}
+
 async function detectOllamaLocalModels(endpoint) {
   try {
-    const resp = await fetch(endpoint + '/api/tags', { signal: AbortSignal.timeout(5000) });
-    if (!resp.ok) return { ok: false, models: [], error: 'Ollama returned status ' + resp.status };
+    const resp = await fetch(endpoint + '/api/tags', {
+      signal: AbortSignal.timeout(5000),
+      mode: 'cors'
+    });
+    if (!resp.ok) return { ok: false, models: [], error: 'Ollama returned status ' + resp.status, isCors: false };
     const data = await resp.json();
     const models = (data.models || []).map(m => ({
       id: m.name,
@@ -3785,9 +3800,14 @@ async function detectOllamaLocalModels(endpoint) {
       parameterSize: m.details && m.details.parameter_size || '',
       quantization: m.details && m.details.quantization_level || ''
     }));
-    return { ok: true, models, error: null };
+    return { ok: true, models, error: null, isCors: false };
   } catch(e) {
-    return { ok: false, models: [], error: e.message || 'Could not connect to Ollama' };
+    // TypeError = network/CORS error; detect PNA block for localhost from public HTTPS
+    const isCors = e instanceof TypeError && isLocalEndpoint(endpoint) && needsCorsConfig();
+    const msg = isCors
+      ? 'Browser blocked access to localhost (CORS/Private Network Access).'
+      : (e.message || 'Could not connect to Ollama');
+    return { ok: false, models: [], error: msg, isCors };
   }
 }
 
@@ -4219,6 +4239,9 @@ async function callOllamaLocal(systemPrompt, userMessage, settings) {
       body: JSON.stringify(reqBody)
     });
   } catch(e) {
+    if (e instanceof TypeError && isLocalEndpoint(endpoint) && needsCorsConfig()) {
+      throw new Error('Browser blocked access to Ollama (CORS). Configure Ollama with:\nOLLAMA_ORIGINS=' + location.origin + ' ollama serve');
+    }
     throw new Error('Could not connect to Ollama at ' + endpoint + '. Is Ollama running? Start it with: ollama serve');
   }
   if (!resp.ok) {
@@ -5350,7 +5373,13 @@ function showAISettings() {
   // Model info area
   html += '<div id="ollamaLocalInfo" class="ai-local-info">';
   if (localModels.length === 0) {
-    html += 'Click <strong>Detect Models</strong> to find models installed on your machine.<br><br>';
+    if (needsCorsConfig()) {
+      html += '<strong>Setup required:</strong> Ollama must allow this site. Start Ollama with:<br>';
+      html += '<code>OLLAMA_ORIGINS=' + location.origin + ' ollama serve</code><br><br>';
+      html += 'Then click <strong>Detect Models</strong> above.<br><br>';
+    } else {
+      html += 'Click <strong>Detect Models</strong> to find models installed on your machine.<br><br>';
+    }
     html += 'Recommended models to install:<br>';
     OLLAMA_LOCAL_RECOMMENDED.forEach(m => {
       html += '<code>ollama pull ' + m.id + '</code> &mdash; ' + m.description + '<br>';
@@ -5447,11 +5476,19 @@ async function detectLocalModels() {
     if (result.error) {
       infoHtml += '<span style="color:var(--red);">' + result.error + '</span><br><br>';
     }
-    infoHtml += 'Make sure Ollama is running: <code>ollama serve</code><br><br>';
-    infoHtml += 'Recommended models to install:<br>';
-    OLLAMA_LOCAL_RECOMMENDED.forEach(m => {
-      infoHtml += '<code>ollama pull ' + m.id + '</code> &mdash; ' + m.description + '<br>';
-    });
+    if (result.isCors) {
+      infoHtml += '<strong>Fix:</strong> Ollama must allow this site\'s origin. Restart Ollama with:<br>';
+      infoHtml += '<code>OLLAMA_ORIGINS=' + location.origin + ' ollama serve</code><br><br>';
+      infoHtml += 'Or set it permanently:<br>';
+      infoHtml += '<code>launchctl setenv OLLAMA_ORIGINS "' + location.origin + '"</code><br>';
+      infoHtml += 'Then restart Ollama and click Detect Models again.<br>';
+    } else {
+      infoHtml += 'Make sure Ollama is running: <code>ollama serve</code><br><br>';
+      infoHtml += 'Recommended models to install:<br>';
+      OLLAMA_LOCAL_RECOMMENDED.forEach(m => {
+        infoHtml += '<code>ollama pull ' + m.id + '</code> &mdash; ' + m.description + '<br>';
+      });
+    }
     info.innerHTML = infoHtml;
   }
 }
