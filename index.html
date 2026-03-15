@@ -4219,6 +4219,9 @@ async function callOllamaCloud(systemPrompt, userMessage, settings) {
 
 async function callOllamaLocal(systemPrompt, userMessage, settings) {
   const endpoint = settings.ollamaLocal.endpoint || 'http://localhost:11434';
+  if (isLocalEndpoint(endpoint) && needsCorsConfig()) {
+    throw new Error('Chrome blocks HTTPS sites from reaching localhost. Use Ollama Cloud provider, or serve the app locally (python3 -m http.server 8080).');
+  }
   const modelId = settings.ollamaLocal.model;
   if (!modelId) throw new Error('No local model selected. Open AI Settings and detect your installed models.');
   const reqBody = {
