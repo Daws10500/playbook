@@ -3843,7 +3843,7 @@ function loadAISettings() {
       }
       // Ensure ollamaLocal defaults exist
       if (!parsed.ollamaLocal) {
-        parsed.ollamaLocal = { endpoint: 'http://localhost:11434', model: '', temperature: 0.7, numCtx: 4096 };
+        parsed.ollamaLocal = { endpoint: 'http://localhost:11434', model: '', temperature: 0.7, numCtx: 8192 };
       }
       return parsed;
     }
@@ -3852,7 +3852,7 @@ function loadAISettings() {
     provider: 'anthropic',
     anthropic: { apiKey: '', model: 'claude-sonnet-4-6' },
     ollamaCloud: { endpoint: 'http://localhost:11434', apiKey: '', model: 'gemini-3-flash-preview:cloud', thinking: true, temperature: 0.7, numCtx: 8192 },
-    ollamaLocal: { endpoint: 'http://localhost:11434', model: '', temperature: 0.7, numCtx: 4096 },
+    ollamaLocal: { endpoint: 'http://localhost:11434', model: '', temperature: 0.7, numCtx: 8192 },
     proxyUrl: SUPABASE_URL + '/functions/v1/ai-proxy'
   };
 }
@@ -4169,7 +4169,9 @@ function parseOllamaResponse(respText) {
   if (data.error) throw new Error(typeof data.error === 'string' ? data.error : (data.error.message || JSON.stringify(data.error)));
   if (data.message) {
     if (data.message.content && data.message.content.trim()) return data.message.content;
-    if (data.message.thinking && data.message.thinking.trim()) return data.message.thinking;
+    if (data.message.thinking && data.message.thinking.trim()) {
+      throw new Error('Model produced reasoning but no answer. Try a larger context size or a different model.');
+    }
   }
   console.error('Unexpected Ollama response:', data);
   throw new Error('Unexpected Ollama response format');
@@ -4232,9 +4234,10 @@ async function callOllamaLocal(systemPrompt, userMessage, settings) {
     ],
     stream: false,
     format: 'json',
+    think: false,
     options: {
       temperature: settings.ollamaLocal.temperature != null ? settings.ollamaLocal.temperature : 0.7,
-      num_ctx: settings.ollamaLocal.numCtx || 4096
+      num_ctx: settings.ollamaLocal.numCtx || 8192
     }
   };
   let resp;
@@ -4341,7 +4344,7 @@ function renderAI() {
     const localModel = settings.ollamaLocal.model;
     html += 'Provider: <strong>Ollama Local</strong>';
     if (localModel) {
-      const ctxLabel = (settings.ollamaLocal.numCtx || 4096) >= 1024 ? ((settings.ollamaLocal.numCtx || 4096) / 1024) + 'K ctx' : (settings.ollamaLocal.numCtx || 4096) + ' ctx';
+      const ctxLabel = (settings.ollamaLocal.numCtx || 8192) >= 1024 ? ((settings.ollamaLocal.numCtx || 8192) / 1024) + 'K ctx' : (settings.ollamaLocal.numCtx || 8192) + ' ctx';
       html += ' &mdash; ' + localModel + ' (' + ctxLabel + ', temp ' + (settings.ollamaLocal.temperature != null ? settings.ollamaLocal.temperature : 0.7) + ')';
     } else {
       html += ' <span style="color:var(--red);">(no model selected)</span>';
@@ -5404,7 +5407,7 @@ function showAISettings() {
 
   // Context length selector
   const localCtxOptions = [2048, 4096, 8192, 16384, 32768];
-  const currentLocalCtx = settings.ollamaLocal.numCtx || 4096;
+  const currentLocalCtx = settings.ollamaLocal.numCtx || 8192;
   html += '<label>Context Length</label>';
   html += '<select id="aiSettingsLocalCtx">';
   localCtxOptions.forEach(v => {
