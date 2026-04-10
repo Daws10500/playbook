@@ -545,6 +545,50 @@
   .empty-state .icon { font-size:40px; margin-bottom:12px; }
   .bottom-spacer { height:80px; }
 
+  /* ========= MASTER LINEUP DRAWER ========= */
+  .lineup-drawer {
+    position:sticky; top:49px; z-index:60;
+    background:var(--nav-bg); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+    border-bottom:1px solid var(--border); transition:background .3s, border-color .3s;
+  }
+  .lineup-drawer-bar {
+    display:flex; align-items:center; gap:10px;
+    padding:9px 12px; cursor:pointer;
+    -webkit-user-select:none; user-select:none;
+  }
+  .lineup-drawer-bar:active { background:var(--surface2); }
+  .lineup-drawer-label {
+    font-size:11px; font-weight:800; letter-spacing:1px;
+    color:var(--text2); text-transform:uppercase; flex-shrink:0;
+  }
+  .lineup-drawer-mini {
+    display:flex; flex:1; gap:10px; overflow-x:auto; min-width:0;
+    -webkit-overflow-scrolling:touch; scrollbar-width:none;
+  }
+  .lineup-drawer-mini::-webkit-scrollbar { display:none; }
+  .lineup-mini-chip {
+    display:inline-flex; align-items:center; gap:4px;
+    font-size:12px; font-weight:600; color:var(--text);
+    white-space:nowrap; flex-shrink:0;
+  }
+  .lineup-mini-chip.empty { color:var(--text2); font-weight:500; }
+  .lineup-mini-dot {
+    width:8px; height:8px; border-radius:50%;
+    display:inline-block; flex-shrink:0;
+  }
+  .lineup-mini-dot.square { border-radius:2px; }
+  .lineup-drawer-chevron {
+    color:var(--text2); font-size:10px; transition:transform .2s;
+    flex-shrink:0;
+  }
+  .lineup-drawer.expanded .lineup-drawer-chevron { transform:rotate(180deg); }
+  .lineup-drawer-body {
+    display:none; grid-template-columns:repeat(6,1fr); gap:6px;
+    padding:4px 12px 12px;
+  }
+  .lineup-drawer.expanded .lineup-drawer-body { display:grid; }
+  .lineup-drawer-body .pos-cell { padding:8px 4px; }
+
   /* ========= STATS VIEW ========= */
   .stats-section { padding:12px 16px 4px; }
   .stats-section h3 { font-size:14px; font-weight:700; color:var(--text2); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px; }
@@ -997,6 +1041,14 @@
 </div>
 
 <div id="view-gameplan" class="view active">
+  <div class="lineup-drawer" id="lineupDrawer">
+    <div class="lineup-drawer-bar" onclick="toggleLineupDrawer()">
+      <div class="lineup-drawer-label">Lineup</div>
+      <div class="lineup-drawer-mini" id="lineupDrawerMini"></div>
+      <span class="lineup-drawer-chevron">&#9662;</span>
+    </div>
+    <div class="lineup-drawer-body" id="lineupDrawerBody"></div>
+  </div>
   <div class="search-bar">
     <input type="text" id="searchInput" placeholder="Search plays, players..." oninput="filterPlays()">
   </div>
@@ -1163,6 +1215,7 @@ async function fullSync() {
       games:    { get: () => localStorage.getItem('playbook_games'),    set: v => { games = JSON.parse(v); localStorage.setItem('playbook_games', v); } },
       roster:   { get: () => localStorage.getItem('playbook_roster'),   set: v => { roster = JSON.parse(v); localStorage.setItem('playbook_roster', v); } },
       gamelogs: { get: () => localStorage.getItem('playbook_gamelogs'), set: v => { gameLogs = JSON.parse(v); localStorage.setItem('playbook_gamelogs', v); } },
+      team_lineup: { get: () => localStorage.getItem('playbook_team_lineup'), set: v => { teamLineup = { C:'',Q:'',W:'',X:'',Y:'',Z:'', ...JSON.parse(v) }; localStorage.setItem('playbook_team_lineup', v); } },
       theme:    { get: () => localStorage.getItem('playbook_theme'),    set: v => { localStorage.setItem('playbook_theme', v); document.documentElement.setAttribute('data-theme', v); document.getElementById('themeBtn').innerHTML = v === 'light' ? '&#9728;&#65039;' : '&#127769;'; } },
       ollama_cloud_models: { get: () => localStorage.getItem('playbook_ollama_cloud_models'), set: v => { localStorage.setItem('playbook_ollama_cloud_models', v); } },
       ollama_local_models: { get: () => localStorage.getItem('playbook_ollama_local_models'), set: v => { localStorage.setItem('playbook_ollama_local_models', v); } },
@@ -1216,7 +1269,7 @@ async function initialMigration() {
   if (localStorage.getItem('playbook_sync_init')) return;
   if (!navigator.onLine) return;
   try {
-    const keyMap = { plays: 'playbook_plays', games: 'playbook_games', roster: 'playbook_roster', gamelogs: 'playbook_gamelogs', theme: 'playbook_theme', ollama_cloud_models: 'playbook_ollama_cloud_models', ollama_local_models: 'playbook_ollama_local_models', ai_settings: 'playbook_ai_settings' };
+    const keyMap = { plays: 'playbook_plays', games: 'playbook_games', roster: 'playbook_roster', gamelogs: 'playbook_gamelogs', team_lineup: 'playbook_team_lineup', theme: 'playbook_theme', ollama_cloud_models: 'playbook_ollama_cloud_models', ollama_local_models: 'playbook_ollama_local_models', ai_settings: 'playbook_ai_settings' };
     const syncMeta = {};
     for (const [sbKey, lsKey] of Object.entries(keyMap)) {
       const raw = localStorage.getItem(lsKey);
@@ -1576,6 +1629,9 @@ let pendingPhoto = null; // base64 photo for add/edit form
 let pendingDiagramData = null; // Konva JSON for re-editing diagrams
 let games = [];
 let activeGameId = null;
+let teamLineup = { C:'', Q:'', W:'', X:'', Y:'', Z:'' };
+let lineupInitialized = false;
+let lineupExpanded = false;
 
 // ============= THEME =============
 function toggleTheme() {
@@ -1629,6 +1685,26 @@ function saveRoster() {
   pushToSupabase('roster', roster);
 }
 function loadRoster() { try { const s = localStorage.getItem('playbook_roster'); if (s) roster = JSON.parse(s); } catch(e) {} }
+function saveTeamLineup() {
+  try { localStorage.setItem('playbook_team_lineup', JSON.stringify(teamLineup)); } catch(e) {}
+  const meta = JSON.parse(localStorage.getItem('playbook_sync_meta') || '{}');
+  meta.team_lineup = new Date().toISOString();
+  localStorage.setItem('playbook_sync_meta', JSON.stringify(meta));
+  pushToSupabase('team_lineup', teamLineup);
+}
+function loadTeamLineup() {
+  try {
+    const s = localStorage.getItem('playbook_team_lineup');
+    if (s) {
+      const parsed = JSON.parse(s);
+      teamLineup = { C:'', Q:'', W:'', X:'', Y:'', Z:'', ...parsed };
+    }
+    lineupInitialized = localStorage.getItem('playbook_lineup_initialized') === '1';
+  } catch(e) {}
+}
+function saveLineupInit() {
+  try { localStorage.setItem('playbook_lineup_initialized', lineupInitialized ? '1' : '0'); } catch(e) {}
+}
 
 // ============= IMAGE COMPRESSION =============
 function compressImage(file, maxW, maxH, quality) {
@@ -1663,6 +1739,7 @@ function showView(name) {
   if (name === 'gameplan') {
     document.getElementById('view-gameplan').classList.add('active');
     document.querySelectorAll('.nav-btn')[0].classList.add('active');
+    renderLineupDrawer();
     renderPlayList();
   } else if (name === 'detail') {
     document.getElementById('view-detail').classList.add('active');
@@ -1716,10 +1793,11 @@ function renderPlayList() {
       ? '<span class="play-action-badge badge-run">RUN</span>'
       : '<span class="play-action-badge badge-pass">PASS</span>';
     const hasCustom = p.customDiagram ? ' &#128247;' : '';
+    const lockBadge = p.locked ? ' &#128274;' : '';
     html += `<div class="play-card" draggable="true" data-play-num="${p.num}" onclick="showPlay(${p.num})">
       <div class="drag-handle" title="Drag to reorder">&#8942;&#8942;</div>
       <div class="play-num">${p.num}</div>
-      <div class="play-info"><div class="play-name">${p.type}${hasCustom}</div><div class="play-var">${p.variation}</div></div>
+      <div class="play-info"><div class="play-name">${p.type}${hasCustom}${lockBadge}</div><div class="play-var">${p.variation}</div></div>
       ${badge}<div class="play-chevron">&#8250;</div></div>`;
   });
   list.innerHTML = html;
@@ -1727,6 +1805,102 @@ function renderPlayList() {
 }
 function setFilter(f) { activeFilter = f; renderPlayList(); }
 function filterPlays() { renderPlayList(); }
+
+// ============= MASTER LINEUP =============
+function renderLineupDrawer() {
+  const drawer = document.getElementById('lineupDrawer');
+  if (!drawer) return;
+  drawer.classList.toggle('expanded', lineupExpanded);
+  const mini = document.getElementById('lineupDrawerMini');
+  mini.innerHTML = ['C','Q','W','X','Y','Z'].map(pos => {
+    const pc = posColors[pos];
+    const name = teamLineup[pos] || '—';
+    const empty = teamLineup[pos] ? '' : ' empty';
+    const dotCls = pc && pc.shape === 'square' ? ' square' : '';
+    return `<span class="lineup-mini-chip${empty}"><span class="lineup-mini-dot${dotCls}" style="background:${pc?pc.color:'#555'}"></span>${pos}:${name}</span>`;
+  }).join('');
+  const body = document.getElementById('lineupDrawerBody');
+  body.innerHTML = ['C','Q','W','X','Y','Z'].map(pos => {
+    const pc = posColors[pos];
+    return `<div class="pos-cell" style="border-color:${pc ? pc.color : 'var(--border)'}" onclick="showLineupPicker('${pos}')">
+      <div class="pos-label" style="color:${pc ? pc.color : 'var(--accent)'}">${posDot(pos)} ${pos}</div>
+      <div class="pos-player">${teamLineup[pos] || '-'}</div></div>`;
+  }).join('');
+}
+
+function toggleLineupDrawer() {
+  lineupExpanded = !lineupExpanded;
+  renderLineupDrawer();
+}
+
+function showLineupPicker(pos) {
+  const pc = posColors[pos];
+  const color = pc ? pc.color : 'var(--accent)';
+  const eligible = roster.filter(p => {
+    const poss = p.positions ? p.positions.split(',').map(x => x.trim()) : [];
+    return poss.includes(pos);
+  });
+  const currentPlayer = teamLineup[pos] || '';
+  const otherPositions = ['C','Q','W','X','Y','Z'].filter(p => p !== pos);
+  let html = `<div class="picker-title">
+    <span class="picker-pos-dot" style="background:${color}"></span>
+    <h3>${pos} — Master Lineup</h3></div>`;
+  if (eligible.length === 0) {
+    html += '<p style="color:var(--text2);font-size:14px;">No eligible players for this position.</p>';
+  } else {
+    html += '<ul class="picker-list">';
+    eligible.forEach(p => {
+      const lastName = p.name.split(' ').pop();
+      const isCurrent = currentPlayer === lastName;
+      const takenByPos = otherPositions.find(op => teamLineup[op] === lastName);
+      if (takenByPos && !isCurrent) {
+        html += `<li style="opacity:0.4;cursor:default;pointer-events:none;">
+          <span>${lastName} <span style="font-size:12px;color:var(--text2);">(at ${takenByPos})</span></span>
+          <span class="picker-num">${p.number ? '#' + p.number : ''}</span></li>`;
+      } else {
+        html += `<li class="${isCurrent ? 'picker-current' : ''}" onclick="assignLineupPlayer('${pos}','${lastName}')">
+          <span>${lastName}</span>
+          <span class="picker-num">${p.number ? '#' + p.number : ''}</span></li>`;
+      }
+    });
+    html += '</ul>';
+    if (currentPlayer) {
+      html += `<div class="picker-clear" onclick="assignLineupPlayer('${pos}','')">Clear Assignment</div>`;
+    }
+  }
+  document.getElementById('modalBox').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('active');
+}
+
+function assignLineupPlayer(pos, name) {
+  const unlocked = plays.filter(p => !p.locked);
+  const conflictCount = unlocked.filter(p => p[pos] && p[pos] !== name).length;
+  if (!lineupInitialized && conflictCount > 0) {
+    const msg = `Apply master lineup to all unlocked plays?\n\nThis will overwrite existing player assignments in ${conflictCount} play(s). Locked plays are skipped. You won't be asked again.`;
+    if (!confirm(msg)) {
+      document.getElementById('modalOverlay').classList.remove('active');
+      return;
+    }
+    lineupInitialized = true;
+    saveLineupInit();
+  }
+  teamLineup[pos] = name;
+  unlocked.forEach(p => { p[pos] = name; });
+  savePlays();
+  saveTeamLineup();
+  renderLineupDrawer();
+  renderPlayList();
+  document.getElementById('modalOverlay').classList.remove('active');
+}
+
+function toggleLockPlay(num) {
+  const p = plays.find(p => p.num === num);
+  if (!p) return;
+  p.locked = !p.locked;
+  savePlays();
+  showPlay(num);
+  renderPlayList();
+}
 
 // ============= DRAG & DROP REORDER =============
 let dragSrcNum = null;
@@ -1884,9 +2058,12 @@ function showPlay(num) {
   const play = plays.find(p => p.num === num);
   if (!play) return;
   const header = document.getElementById('detailHeader');
+  const lockTitle = play.locked ? 'Unlock play (master lineup changes will apply)' : 'Lock play (master lineup changes will skip this play)';
+  const lockGlyph = play.locked ? '&#128274;' : '&#128275;';
   header.innerHTML = `<div class="detail-top">
     <div class="detail-num">${play.num}</div>
     <div class="detail-title"><h2>${play.type}</h2><div class="subtitle">${play.variation}</div></div>
+    <button class="nav-btn${play.locked?' active':''}" onclick="toggleLockPlay(${play.num})" style="font-size:13px;" title="${lockTitle}">${lockGlyph}</button>
     <button class="nav-btn" onclick="duplicatePlay(${play.num})" style="font-size:13px;">Duplicate</button>
     <button class="nav-btn" onclick="editPlay(${play.num})" style="font-size:13px;">Edit</button>
   </div>
@@ -5557,7 +5734,9 @@ loadRoster();
 loadPlays();
 loadGames();
 loadGameLogs();
+loadTeamLineup();
 renderPlayList();
+renderLineupDrawer();
 
 // Cloud sync (non-blocking)
 initialMigration().then(() => fullSync()).catch(e => console.warn('Sync init error:', e));
