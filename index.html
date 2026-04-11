@@ -1283,12 +1283,83 @@ async function fullSync() {
       }
     }
     localStorage.setItem('playbook_sync_meta', JSON.stringify(syncMeta));
-    if (changed) { renderPlayList(); renderRoster(); }
+    if (changed) {
+      // Remote pulls may have reintroduced last-name-only strings from an
+      // older device or version — normalize them before re-rendering.
+      try {
+        loadPlays(); loadGames(); loadRoster(); loadTeamLineup();
+        migratePlayerNamesToFullNames();
+      } catch(e) { console.warn('Post-sync migration failed:', e); }
+      renderPlayList(); renderRoster(); renderLineupDrawer();
+    }
     updateSyncIndicator('synced');
   } catch(e) {
     console.error('Sync failed:', e);
     updateSyncIndicator('error');
   }
+}
+
+// One-time upgrade: earlier builds stored last-name-only strings in
+// plays[].{C,Q,W,X,Y,Z}, games[].calls[].{C..Z}, and teamLineup[pos]. Now
+// we store full names everywhere. On every boot, walk those stores and
+// replace any value that matches the last token of a roster player's full
+// name with that full name. Idempotent — values that already match a full
+// name are left alone. Saves back to localStorage (and Supabase) only when
+// something actually changed.
+function migratePlayerNamesToFullNames() {
+  if (!Array.isArray(roster) || roster.length === 0) return;
+  // Build a map: lastName → full roster entry. If two players share a last
+  // name we leave that bucket out (ambiguous; don't guess).
+  const byLast = {};
+  const ambiguous = new Set();
+  roster.forEach(p => {
+    if (!p || !p.name) return;
+    const last = p.name.split(' ').pop();
+    if (byLast[last]) ambiguous.add(last); else byLast[last] = p.name;
+  });
+  ambiguous.forEach(l => { delete byLast[l]; });
+  // Also map any exact-match full name so idempotent re-runs are cheap.
+  const fullNames = new Set(roster.map(p => p && p.name).filter(Boolean));
+  const upgrade = v => {
+    if (!v || typeof v !== 'string') return v;
+    if (fullNames.has(v)) return v;        // already full
+    if (byLast[v]) return byLast[v];       // lookup by last name
+    return v;                               // unknown — leave alone
+  };
+  let playsChanged = false;
+  if (Array.isArray(plays)) {
+    plays.forEach(play => {
+      ['C','Q','W','X','Y','Z'].forEach(pos => {
+        const before = play[pos];
+        const after = upgrade(before);
+        if (after !== before) { play[pos] = after; playsChanged = true; }
+      });
+    });
+  }
+  let gamesChanged = false;
+  if (Array.isArray(games)) {
+    games.forEach(game => {
+      if (!game || !Array.isArray(game.calls)) return;
+      game.calls.forEach(call => {
+        ['C','Q','W','X','Y','Z'].forEach(pos => {
+          const before = call[pos];
+          const after = upgrade(before);
+          if (after !== before) { call[pos] = after; gamesChanged = true; }
+        });
+      });
+    });
+  }
+  let lineupChanged = false;
+  if (teamLineup && typeof teamLineup === 'object') {
+    ['C','Q','W','X','Y','Z'].forEach(pos => {
+      const before = teamLineup[pos];
+      const after = upgrade(before);
+      if (after !== before) { teamLineup[pos] = after; lineupChanged = true; }
+    });
+  }
+  if (playsChanged) savePlays();
+  if (gamesChanged) saveGames();
+  if (lineupChanged) saveTeamLineup();
 }
 
 async function initialMigration() {
@@ -1887,16 +1958,17 @@ function showLineupPicker(pos) {
   } else {
     html += '<ul class="picker-list">';
     eligible.forEach(p => {
-      const lastName = p.name.split(' ').pop();
-      const isCurrent = currentPlayer === lastName;
-      const takenByPos = otherPositions.find(op => teamLineup[op] === lastName);
+      const fullName = p.name;
+      const isCurrent = currentPlayer === fullName;
+      const takenByPos = otherPositions.find(op => teamLineup[op] === fullName);
+      const safeName = fullName.replace(/'/g, "\\'");
       if (takenByPos && !isCurrent) {
         html += `<li style="opacity:0.4;cursor:default;pointer-events:none;">
-          <span>${p.name} <span style="font-size:12px;color:var(--text2);">(at ${takenByPos})</span></span>
+          <span>${fullName} <span style="font-size:12px;color:var(--text2);">(at ${takenByPos})</span></span>
           <span class="picker-num">${p.number ? '#' + p.number : ''}</span></li>`;
       } else {
-        html += `<li class="${isCurrent ? 'picker-current' : ''}" onclick="assignLineupPlayer('${pos}','${lastName}')">
-          <span>${p.name}</span>
+        html += `<li class="${isCurrent ? 'picker-current' : ''}" onclick="assignLineupPlayer('${pos}','${safeName}')">
+          <span>${fullName}</span>
           <span class="picker-num">${p.number ? '#' + p.number : ''}</span></li>`;
       }
     });
@@ -3576,16 +3648,17 @@ function showGamePlayerPicker(callIdx, pos) {
   } else {
     html += '<ul class="picker-list">';
     eligible.forEach(p => {
-      const lastName = p.name.split(' ').pop();
-      const isCurrent = currentPlayer === lastName;
-      const takenByPos = otherPositions.find(op => call[op] === lastName);
+      const fullName = p.name;
+      const isCurrent = currentPlayer === fullName;
+      const takenByPos = otherPositions.find(op => call[op] === fullName);
+      const safeName = fullName.replace(/'/g, "\\'");
       if (takenByPos && !isCurrent) {
         html += `<li style="opacity:0.4;cursor:default;pointer-events:none;">
-          <span>${lastName} <span style="font-size:12px;color:var(--text2);">(at ${takenByPos})</span></span>
+          <span>${fullName} <span style="font-size:12px;color:var(--text2);">(at ${takenByPos})</span></span>
           <span class="picker-num">${p.number ? '#' + p.number : ''}</span></li>`;
       } else {
-        html += `<li class="${isCurrent ? 'picker-current' : ''}" onclick="assignGamePlayer(${callIdx},'${pos}','${lastName}')">
-          <span>${lastName}</span>
+        html += `<li class="${isCurrent ? 'picker-current' : ''}" onclick="assignGamePlayer(${callIdx},'${pos}','${safeName}')">
+          <span>${fullName}</span>
           <span class="picker-num">${p.number ? '#' + p.number : ''}</span></li>`;
       }
     });
@@ -3620,7 +3693,7 @@ function showPlayerPicker(playNum, pos) {
     const poss = p.positions ? p.positions.split(',').map(x => x.trim()) : [];
     return poss.includes(pos);
   });
-  // Get last name for display matching (plays store last names)
+  // Plays store FULL NAMES; compare against p.name directly.
   const currentPlayer = play[pos] || '';
   // Find players already assigned to OTHER positions on this play
   const otherPositions = ['C','Q','W','X','Y','Z'].filter(p => p !== pos);
@@ -3633,17 +3706,18 @@ function showPlayerPicker(playNum, pos) {
   } else {
     html += '<ul class="picker-list">';
     eligible.forEach(p => {
-      const lastName = p.name.split(' ').pop();
-      const isCurrent = currentPlayer === lastName;
-      const takenByPos = otherPositions.find(op => play[op] === lastName);
+      const fullName = p.name;
+      const isCurrent = currentPlayer === fullName;
+      const takenByPos = otherPositions.find(op => play[op] === fullName);
+      const safeName = fullName.replace(/'/g, "\\'");
       if (takenByPos && !isCurrent) {
         // Player already assigned to another position — show greyed out
         html += `<li style="opacity:0.4;cursor:default;pointer-events:none;">
-          <span>${lastName} <span style="font-size:12px;color:var(--text2);">(at ${takenByPos})</span></span>
+          <span>${fullName} <span style="font-size:12px;color:var(--text2);">(at ${takenByPos})</span></span>
           <span class="picker-num">${p.number ? '#' + p.number : ''}</span></li>`;
       } else {
-        html += `<li class="${isCurrent ? 'picker-current' : ''}" onclick="assignPlayer(${playNum},'${pos}','${lastName}')">
-          <span>${lastName}</span>
+        html += `<li class="${isCurrent ? 'picker-current' : ''}" onclick="assignPlayer(${playNum},'${pos}','${safeName}')">
+          <span>${fullName}</span>
           <span class="picker-num">${p.number ? '#' + p.number : ''}</span></li>`;
       }
     });
@@ -6149,11 +6223,12 @@ loadPlays();
 loadGames();
 loadGameLogs();
 loadTeamLineup();
+migratePlayerNamesToFullNames();
 renderPlayList();
 renderLineupDrawer();
 
 // Cloud sync (non-blocking)
-initialMigration().then(() => fullSync()).catch(e => console.warn('Sync init error:', e));
+initialMigration().then(() => fullSync()).then(() => migratePlayerNamesToFullNames()).catch(e => console.warn('Sync init error:', e));
 window.addEventListener('online', () => { updateSyncIndicator('syncing'); fullSync(); });
 window.addEventListener('offline', () => updateSyncIndicator('offline'));
 if (navigator.onLine) updateSyncIndicator('offline'); // will be updated after fullSync
