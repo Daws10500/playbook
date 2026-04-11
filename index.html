@@ -4022,20 +4022,32 @@ function loadAISettings() {
       if (!parsed.ollamaLocal) {
         parsed.ollamaLocal = { endpoint: 'http://localhost:11434', model: '', temperature: 0.7, numCtx: 8192 };
       }
+      // Legacy cleanup: API keys are now stored server-side in Supabase Edge
+      // Function secrets and must never be persisted in localStorage or the
+      // synced ai_settings payload. Strip any that are lingering from older
+      // builds and re-save so the cleaned copy flushes to Supabase.
+      let stripped = false;
+      if (parsed.anthropic && 'apiKey' in parsed.anthropic)   { delete parsed.anthropic.apiKey;   stripped = true; }
+      if (parsed.ollamaCloud && 'apiKey' in parsed.ollamaCloud) { delete parsed.ollamaCloud.apiKey; stripped = true; }
+      if (stripped) saveAISettings(parsed);
       return parsed;
     }
   } catch(e) {}
   return {
     provider: 'anthropic',
-    anthropic: { apiKey: '', model: 'claude-sonnet-4-6' },
-    ollamaCloud: { endpoint: 'http://localhost:11434', apiKey: '', model: 'gemini-3-flash-preview:cloud', thinking: true, temperature: 0.7, numCtx: 8192 },
+    anthropic: { model: 'claude-sonnet-4-6' },
+    ollamaCloud: { endpoint: 'http://localhost:11434', model: 'gemini-3-flash-preview:cloud', thinking: true, temperature: 0.7, numCtx: 8192 },
     ollamaLocal: { endpoint: 'http://localhost:11434', model: '', temperature: 0.7, numCtx: 8192 },
     proxyUrl: SUPABASE_URL + '/functions/v1/ai-proxy'
   };
 }
 
 function saveAISettings(settings) {
-  localStorage.setItem('playbook_ai_settings', JSON.stringify(settings));
+  try { localStorage.setItem('playbook_ai_settings', JSON.stringify(settings)); } catch(e) {}
+  const meta = JSON.parse(localStorage.getItem('playbook_sync_meta') || '{}');
+  meta.ai_settings = new Date().toISOString();
+  localStorage.setItem('playbook_sync_meta', JSON.stringify(meta));
+  pushToSupabase('ai_settings', settings);
 }
 
 function loadAIHistory() {
@@ -4051,6 +4063,37 @@ function saveAIResult(result) {
   history.unshift(result);
   if (history.length > 20) history.length = 20;
   localStorage.setItem('playbook_ai_history', JSON.stringify(history));
+}
+
+// Cached result of the server-side key-configured probe.
+// Shape: { ollamaCloud: bool, anthropic: bool } or null if never fetched.
+let aiConfigStatus = null;
+
+async function probeAIConfig(force) {
+  if (aiConfigStatus && !force) return aiConfigStatus;
+  try {
+    const settings = loadAISettings();
+    const proxyUrl = settings.proxyUrl || SUPABASE_URL + '/functions/v1/ai-proxy';
+    const resp = await fetch(proxyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
+      body: JSON.stringify({ action: 'probe' })
+    });
+    if (!resp.ok) throw new Error('probe failed: ' + resp.status);
+    const data = await resp.json();
+    aiConfigStatus = {
+      ollamaCloud: !!data.ollamaCloud,
+      anthropic:   !!data.anthropic,
+      error:       null
+    };
+  } catch (e) {
+    aiConfigStatus = {
+      ollamaCloud: false,
+      anthropic:   false,
+      error:       e.message || 'unreachable'
+    };
+  }
+  return aiConfigStatus;
 }
 
 function buildAIPrompt(defense, mode, gameId) {
@@ -4382,7 +4425,6 @@ async function callOllamaCloud(systemPrompt, userMessage, settings) {
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
     body: JSON.stringify({
       provider: 'ollama',
-      apiKey: settings.ollamaCloud.apiKey,
       endpoint: cloudEndpoint,
       ollamaBody: reqBody
     })
@@ -4390,7 +4432,8 @@ async function callOllamaCloud(systemPrompt, userMessage, settings) {
   if (!resp.ok) {
     const errText = await resp.text().catch(() => '');
     console.error('Ollama Cloud response status:', resp.status, 'body:', errText);
-    if (resp.status === 401 || resp.status === 403) throw new Error('Ollama API key is invalid or expired. Check your key in AI Settings.');
+    if (resp.status === 503) throw new Error('Server is missing the Ollama Cloud API key. Set OLLAMA_CLOUD_API_KEY in Supabase → Edge Functions → Manage secrets.');
+    if (resp.status === 401 || resp.status === 403) throw new Error('Ollama API key is invalid or expired. Update OLLAMA_CLOUD_API_KEY in your Supabase dashboard.');
     throw new Error('Ollama Cloud error (' + resp.status + '): ' + (errText || 'Unknown error'));
   }
   return parseOllamaResponse(await resp.text());
@@ -4442,7 +4485,6 @@ async function callAI(systemPrompt, userMessage) {
   const settings = loadAISettings();
 
   if (settings.provider === 'anthropic') {
-    if (!settings.anthropic.apiKey) throw new Error('No Anthropic API key configured. Tap the gear icon to add your key.');
     const proxyUrl = settings.proxyUrl || SUPABASE_URL + '/functions/v1/ai-proxy';
     const resp = await fetch(proxyUrl, {
       method: 'POST',
@@ -4453,13 +4495,13 @@ async function callAI(systemPrompt, userMessage) {
         messages: [
           { role: 'user', content: userMessage }
         ],
-        system: systemPrompt,
-        apiKey: settings.anthropic.apiKey
+        system: systemPrompt
       })
     });
     if (!resp.ok) {
       const errText = await resp.text().catch(() => '');
-      if (resp.status === 401) throw new Error('Invalid API key. Check your Anthropic API key in settings.');
+      if (resp.status === 503) throw new Error('Server is missing the Anthropic API key. Set ANTHROPIC_API_KEY in Supabase → Edge Functions → Manage secrets.');
+      if (resp.status === 401) throw new Error('Invalid Anthropic API key on the server. Update ANTHROPIC_API_KEY in your Supabase dashboard.');
       if (resp.status === 429) throw new Error('Rate limited. Please wait a moment and try again.');
       throw new Error('API error (' + resp.status + '): ' + (errText || 'Unknown error'));
     }
@@ -4502,21 +4544,35 @@ function renderAI() {
     return;
   }
 
-  // Provider status
+  // Provider status — server-side key presence is checked asynchronously
+  // via probeAIConfig(); while that's pending we show "checking..." and
+  // re-render once it resolves.
   let disableGenerate = false;
   html += '<div style="padding:0 16px 8px;font-size:12px;color:var(--text2);">';
   if (settings.provider === 'anthropic') {
     const aModel = ANTHROPIC_MODELS.find(m => m.id === settings.anthropic.model);
     html += 'Provider: <strong>Claude</strong>';
     if (aModel) html += ' &mdash; ' + aModel.name;
-    if (!settings.anthropic.apiKey) { html += ' <span style="color:var(--red);">(no API key)</span>'; disableGenerate = true; }
+    if (!aiConfigStatus) {
+      html += ' <span style="color:var(--text2);">(checking server key...)</span>';
+      probeAIConfig().then(() => renderAI());
+    } else if (!aiConfigStatus.anthropic) {
+      html += ' <span style="color:var(--red);">(server key not set)</span>';
+      disableGenerate = true;
+    }
   } else if (settings.provider === 'ollama-cloud') {
     const oCard = loadOllamaCloudModels().find(m => m.id === settings.ollamaCloud.model);
     const modelName = oCard ? oCard.name : settings.ollamaCloud.model;
     const thinkLabel = oCard && oCard.supportsThinking ? (settings.ollamaCloud.thinking ? 'thinking ON' : 'thinking OFF') : 'no thinking';
     const ctxLabel = (settings.ollamaCloud.numCtx || 8192) >= 1024 ? ((settings.ollamaCloud.numCtx || 8192) / 1024) + 'K ctx' : (settings.ollamaCloud.numCtx || 8192) + ' ctx';
     html += 'Provider: <strong>Ollama Cloud</strong> &mdash; ' + modelName + ' (' + thinkLabel + ', ' + ctxLabel + ', temp ' + (settings.ollamaCloud.temperature != null ? settings.ollamaCloud.temperature : 0.7) + ')';
-    if (!settings.ollamaCloud.apiKey) { html += ' <span style="color:var(--red);">(no API key)</span>'; disableGenerate = true; }
+    if (!aiConfigStatus) {
+      html += ' <span style="color:var(--text2);">(checking server key...)</span>';
+      probeAIConfig().then(() => renderAI());
+    } else if (!aiConfigStatus.ollamaCloud) {
+      html += ' <span style="color:var(--red);">(server key not set)</span>';
+      disableGenerate = true;
+    }
   } else if (settings.provider === 'ollama-local') {
     const localModel = settings.ollamaLocal.model;
     html += 'Provider: <strong>Ollama Local</strong>';
@@ -5279,12 +5335,12 @@ async function generatePlayBlock() {
     showAIError('You are offline. AI generation requires an internet connection.');
     return;
   }
-  if (settings.provider === 'anthropic' && !settings.anthropic.apiKey) {
-    showAIError('No API key configured. Tap the gear icon to set up your Anthropic API key.');
+  if (settings.provider === 'anthropic' && aiConfigStatus && !aiConfigStatus.anthropic) {
+    showAIError('Anthropic API key is not configured on the server. Set ANTHROPIC_API_KEY in Supabase → Edge Functions → Manage secrets, then tap the gear icon and click "Recheck status".');
     return;
   }
-  if (settings.provider === 'ollama-cloud' && !settings.ollamaCloud.apiKey) {
-    showAIError('No Ollama Cloud API key configured. Tap the gear icon to add your API key.');
+  if (settings.provider === 'ollama-cloud' && aiConfigStatus && !aiConfigStatus.ollamaCloud) {
+    showAIError('Ollama Cloud API key is not configured on the server. Set OLLAMA_CLOUD_API_KEY in Supabase → Edge Functions → Manage secrets, then tap the gear icon and click "Recheck status".');
     return;
   }
   if (settings.provider === 'ollama-local' && !settings.ollamaLocal.model) {
@@ -5468,6 +5524,28 @@ function showAISettings() {
   html += '<div class="ai-settings-group">';
   html += '<h3 style="margin-bottom:16px;">AI Settings</h3>';
 
+  // Server-managed key status card
+  const st = aiConfigStatus;
+  const mk = (label, ok) => {
+    if (!st) return '<div style="margin:4px 0;">' + label + ': <span style="color:var(--text2);">checking\u2026</span></div>';
+    if (ok)  return '<div style="margin:4px 0;">' + label + ': <span style="color:var(--green);font-weight:700;">&#10003; Configured</span></div>';
+    return          '<div style="margin:4px 0;">' + label + ': <span style="color:var(--red);font-weight:700;">&#10007; Not configured</span></div>';
+  };
+  html += '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:16px;font-size:13px;">';
+  html += '<div style="font-weight:700;margin-bottom:8px;">Server-managed API keys</div>';
+  html += mk('Ollama Cloud', st && st.ollamaCloud);
+  html += mk('Anthropic',    st && st.anthropic);
+  html += '<div style="margin-top:10px;font-size:12px;color:var(--text2);line-height:1.5;">';
+  html += 'Keys live in Supabase Edge Function secrets and never touch this browser. ';
+  html += 'To set or rotate a key, open <strong>Supabase Dashboard &rarr; Edge Functions &rarr; Manage secrets</strong> ';
+  html += 'and set <code>OLLAMA_CLOUD_API_KEY</code> / <code>ANTHROPIC_API_KEY</code>.';
+  html += '</div>';
+  html += '<div style="display:flex;gap:6px;margin-top:10px;">';
+  html += '<a class="nav-btn" href="https://supabase.com/dashboard/project/rqdpvwevjecwtadoulno/functions/ai-proxy/secrets" target="_blank" rel="noopener" style="text-decoration:none;">Open Supabase &#8599;</a>';
+  html += '<button class="nav-btn" onclick="aiConfigStatus=null;probeAIConfig(true).then(()=>showAISettings());">Recheck status</button>';
+  html += '</div>';
+  html += '</div>';
+
   // Provider toggle
   html += '<label>Provider</label>';
   html += '<select id="aiSettingsProvider" onchange="toggleAISettingsFields()">';
@@ -5478,8 +5556,6 @@ function showAISettings() {
 
   // Anthropic fields
   html += '<div id="aiSettingsAnthropic" style="' + (settings.provider !== 'anthropic' ? 'display:none;' : '') + '">';
-  html += '<label>API Key</label>';
-  html += '<input type="password" id="aiSettingsApiKey" value="' + (settings.anthropic.apiKey || '') + '" placeholder="sk-ant-...">';
   html += '<label>Model</label>';
   html += '<select id="aiSettingsModel">';
   ANTHROPIC_MODELS.forEach(m => {
@@ -5496,8 +5572,6 @@ function showAISettings() {
   html += '<div id="aiSettingsOllamaCloud" style="' + (settings.provider !== 'ollama-cloud' ? 'display:none;' : '') + '">';
   html += '<label>Endpoint</label>';
   html += '<input type="text" id="aiSettingsCloudEndpoint" value="' + (settings.ollamaCloud.endpoint || 'http://localhost:11434') + '">';
-  html += '<label>API Key</label>';
-  html += '<input type="password" id="aiSettingsCloudKey" value="' + (settings.ollamaCloud.apiKey || '') + '" placeholder="Ollama cloud API key">';
 
   html += '<label>Model</label>';
   html += '<select id="aiSettingsCloudModel" onchange="onOllamaCloudModelChange()">';
@@ -5599,6 +5673,11 @@ function showAISettings() {
 
   document.getElementById('modalBox').innerHTML = html;
   document.getElementById('modalOverlay').classList.add('active');
+  // Kick off (or reuse) the server-key probe so the status card can populate.
+  if (!aiConfigStatus) probeAIConfig().then(() => {
+    // Only re-render if the modal is still open on the same view
+    if (document.getElementById('modalOverlay').classList.contains('active')) showAISettings();
+  });
 }
 
 function onOllamaCloudModelChange() {
@@ -5693,12 +5772,10 @@ function saveAISettingsFromModal() {
   const settings = {
     provider: provider,
     anthropic: {
-      apiKey: document.getElementById('aiSettingsApiKey').value.trim(),
       model: document.getElementById('aiSettingsModel').value
     },
     ollamaCloud: {
       endpoint: document.getElementById('aiSettingsCloudEndpoint').value.trim(),
-      apiKey: document.getElementById('aiSettingsCloudKey').value.trim(),
       model: document.getElementById('aiSettingsCloudModel').value,
       thinking: document.getElementById('aiSettingsCloudThinking').checked,
       temperature: parseFloat(document.getElementById('aiSettingsCloudTemp').value),

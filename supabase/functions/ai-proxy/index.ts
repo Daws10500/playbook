@@ -6,6 +6,13 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
@@ -14,17 +21,28 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
+
+    // Status probe: tells the client which provider keys are configured
+    // server-side WITHOUT revealing the keys themselves.
+    if (body?.action === "probe") {
+      return json({
+        ollamaCloud: !!Deno.env.get("OLLAMA_CLOUD_API_KEY"),
+        anthropic:   !!Deno.env.get("ANTHROPIC_API_KEY"),
+      });
+    }
+
     const { provider } = body;
 
     if (provider === "ollama") {
-      // Proxy Ollama Cloud requests
-      const { apiKey, endpoint, ollamaBody } = body;
+      // Proxy Ollama Cloud requests. API key is read from Edge Function
+      // secrets — the client never sends it.
+      const apiKey = Deno.env.get("OLLAMA_CLOUD_API_KEY");
       if (!apiKey) {
-        return new Response(
-          JSON.stringify({ error: "Ollama API key is required for cloud proxy" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return json({
+          error: "Server is missing OLLAMA_CLOUD_API_KEY. Set it in Supabase → Edge Functions → Manage secrets."
+        }, 503);
       }
+      const { endpoint, ollamaBody } = body;
       const ollamaEndpoint = endpoint || "https://ollama.com";
       const ollamaResp = await fetch(`${ollamaEndpoint}/api/chat`, {
         method: "POST",
@@ -39,10 +57,9 @@ Deno.serve(async (req) => {
       try {
         data = JSON.parse(respText);
       } catch {
-        return new Response(
-          JSON.stringify({ error: `Ollama returned non-JSON (status ${ollamaResp.status}): ${respText.slice(0, 200)}` }),
-          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return json({
+          error: `Ollama returned non-JSON (status ${ollamaResp.status}): ${respText.slice(0, 200)}`
+        }, 502);
       }
       return new Response(JSON.stringify(data), {
         status: ollamaResp.status,
@@ -51,20 +68,19 @@ Deno.serve(async (req) => {
     }
 
     if (provider !== "anthropic") {
-      return new Response(
-        JSON.stringify({ error: "Unsupported provider: " + provider }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return json({ error: "Unsupported provider: " + provider }, 400);
     }
 
-    const { model, messages, system, apiKey } = body;
-
+    // Anthropic: API key read from Edge Function secrets — the client
+    // never sends it.
+    const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
     if (!apiKey) {
-      return new Response(
-        JSON.stringify({ error: "API key is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return json({
+        error: "Server is missing ANTHROPIC_API_KEY. Set it in Supabase → Edge Functions → Manage secrets."
+      }, 503);
     }
+
+    const { model, messages, system } = body;
 
     const anthropicResp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -88,9 +104,6 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    return new Response(
-      JSON.stringify({ error: e.message || "Internal server error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return json({ error: e.message || "Internal server error" }, 500);
   }
 });
