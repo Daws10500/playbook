@@ -226,6 +226,33 @@
     margin-bottom:4px; display:flex; align-items:center; justify-content:center; gap:3px;
   }
   .pos-player { font-size:13px; font-weight:600; color:var(--text); word-break:break-word; }
+  .pos-route {
+    display:inline-block; margin-top:6px; padding:3px 8px; border-radius:999px;
+    font-size:11px; font-weight:700; background:var(--surface2); color:var(--text);
+    border:1px solid var(--border); cursor:pointer; line-height:1.2;
+    -webkit-user-select:none; user-select:none;
+  }
+  .pos-route:active { transform:scale(0.92); opacity:0.85; }
+
+  .route-info-modal { max-width:440px; }
+  .route-info-header { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+  .route-info-header .ri-pos {
+    width:32px; height:32px; border-radius:50%; display:flex; align-items:center;
+    justify-content:center; font-weight:800; color:#fff; flex-shrink:0;
+  }
+  .route-info-header h3 { margin:0; font-size:18px; }
+  .route-info-desc { color:var(--text2); font-size:14px; margin-bottom:14px; line-height:1.5; }
+  .route-info-svg {
+    width:100%; max-width:320px; margin:0 auto; display:block;
+    background:var(--surface2); border:1px solid var(--border); border-radius:10px;
+  }
+  .route-info-svg .rt-route { fill:none; stroke:var(--text2); stroke-width:2; opacity:0.22; }
+  .route-info-svg .rt-route.rt-selected { stroke:var(--accent); stroke-width:3.5; opacity:1; }
+  .route-info-svg .rt-label { font-size:10px; font-weight:700; fill:var(--text2); opacity:0.4; }
+  .route-info-svg .rt-label.rt-selected { fill:var(--accent); opacity:1; font-size:11px; }
+  .route-info-svg .rt-origin { fill:var(--text); }
+  .route-info-close { margin-top:14px; width:100%; padding:12px; border-radius:10px; border:none;
+    background:var(--accent); color:#fff; font-weight:700; font-size:14px; cursor:pointer; }
 
   .diagram-section { padding:12px 16px; }
   .diagram-label { font-size:12px; font-weight:700; color:var(--text2); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; }
@@ -1136,7 +1163,6 @@
       <option value="Wheel">Wheel</option>
       <option value="Flat">Flat</option>
       <option value="Screen">Screen</option>
-      <option value="Block">Block</option>
     </select>
     <button class="de-btn de-undo" onclick="diagramUndo()" title="Undo">&#8630;</button>
     <button class="de-btn de-clear" onclick="diagramClear()" title="Clear routes">Clear</button>
@@ -1767,10 +1793,21 @@ function showView(name) {
 }
 
 // ============= GAME PLAN LIST =============
+const playCategories = ['All', 'Pass', 'Handoff', 'Fake', 'Reverse', 'Trick'];
+function getPlayCategory(p) {
+  if (p && p.category) return p.category;
+  const t = ((p && p.type) || '').toLowerCase();
+  if (t.includes('trick')) return 'Trick';
+  if (t.includes('reverse')) return 'Reverse';
+  if (t.includes('fake')) return 'Fake';
+  if (t.includes('handoff') || t.includes('sweep') || t.includes('draw') || /\brun\b/.test(t)) return 'Handoff';
+  if (p && p.action === 'RUN') return 'Handoff';
+  return 'Pass';
+}
 function renderPlayList() {
   const search = (document.getElementById('searchInput').value || '').toLowerCase();
   let filtered = plays;
-  if (activeFilter !== 'All') filtered = filtered.filter(p => p.type === activeFilter);
+  if (activeFilter !== 'All') filtered = filtered.filter(p => getPlayCategory(p) === activeFilter);
   if (search) {
     filtered = filtered.filter(p =>
       p.type.toLowerCase().includes(search) || p.variation.toLowerCase().includes(search) ||
@@ -1781,7 +1818,7 @@ function renderPlayList() {
     );
   }
   const chips = document.getElementById('filterChips');
-  chips.innerHTML = ['All', ...playTypes].map(t =>
+  chips.innerHTML = playCategories.map(t =>
     '<div class="filter-chip ' + (t === activeFilter ? 'active' : '') + '" onclick="setFilter(\'' + t.replace(/'/g,"\\'") + '\')">' + t + '</div>'
   ).join('');
   const list = document.getElementById('playList');
@@ -2079,9 +2116,15 @@ function showPlay(num) {
   const grid = document.getElementById('playerGrid');
   grid.innerHTML = ['C','Q','W','X','Y','Z'].map(pos => {
     const pc = posColors[pos];
+    const rl = play.routeLabels && play.routeLabels[pos];
+    const tree = rl ? ROUTE_TREE.find(r => r.name.toLowerCase() === String(rl).toLowerCase()) : null;
+    const pillText = tree ? (tree.name + ' (' + tree.n + ')') : (rl || '');
+    const pill = rl
+      ? `<div class="pos-route" style="border-color:${pc ? pc.color : 'var(--border)'}" onclick="event.stopPropagation();showRouteInfo('${pos}','${rl}');">${pillText}</div>`
+      : '';
     return `<div class="pos-cell" style="border-color:${pc ? pc.color : 'var(--border)'}" onclick="showPlayerPicker(${play.num},'${pos}')">
       <div class="pos-label" style="color:${pc ? pc.color : 'var(--accent)'}">${posDot(pos)} ${pos}</div>
-      <div class="pos-player">${play[pos] || '-'}</div></div>`;
+      <div class="pos-player">${play[pos] || '-'}</div>${pill}</div>`;
   }).join('');
   const routeDescEl = document.getElementById('routeDescSection');
   if (play.routeDescriptions) {
@@ -2679,7 +2722,43 @@ const ROUTE_PRESETS = {
   'Wheel': { points:[{dx:-50,dy:-30},{dx:-50,dy:-280}], type:'solid' },
   'Flat': { points:[{dx:100,dy:20}], type:'solid' },
   'Screen': { points:[{dx:30,dy:40},{dx:80,dy:20}], type:'dashed' },
-  'Block': { points:[{dx:0,dy:-40}], type:'block' },
+};
+
+// ============= RECEIVER ROUTE TREE =============
+// Canonical 9-route receiver tree used by the AI labeling pass and the
+// click-to-see-label popup. Must be kept in sync with the labels the AI is
+// allowed to emit in labelPlayRoutes() and with the validator in
+// parseRouteLabels(). The `vec` field is a unit direction used by the inline
+// SVG in showRouteInfo() — origin is the receiver, +y is downfield, -x is
+// toward the left sideline. `break` is the depth (0..1) at which the route
+// changes direction; null means a straight line from origin to endpoint.
+const ROUTE_TREE = [
+  { n:1, name:'Flat',     desc:'Short break to the sideline at 1-2 yds depth.',              vec:[{x:0,y:-0.15},{x:-0.9,y:-0.15}] },
+  { n:2, name:'Slant',    desc:'Quick diagonal cut inside after 2-3 steps.',                  vec:[{x:0,y:-0.2},{x:0.6,y:-0.55}] },
+  { n:3, name:'Comeback', desc:'Vertical release then sharp cut back to the sideline.',      vec:[{x:0,y:-0.55},{x:-0.35,y:-0.4}] },
+  { n:4, name:'Curl',     desc:'Vertical release then turn back to face the QB.',            vec:[{x:0,y:-0.55},{x:0.2,y:-0.42}] },
+  { n:5, name:'Out',      desc:'Vertical release then break outside at depth.',              vec:[{x:0,y:-0.45},{x:-0.9,y:-0.45}] },
+  { n:6, name:'Dig',      desc:'Vertical release then break inside across the middle.',      vec:[{x:0,y:-0.45},{x:0.9,y:-0.45}] },
+  { n:7, name:'Corner',   desc:'Vertical release then angled break toward the sideline/pylon.',vec:[{x:0,y:-0.45},{x:-0.7,y:-0.85}] },
+  { n:8, name:'Post',     desc:'Vertical release then angled break toward the goalpost.',    vec:[{x:0,y:-0.45},{x:0.55,y:-0.9}] },
+  { n:9, name:'Fade',     desc:'Straight vertical release, deep shot.',                      vec:[{x:0,y:-0.95}] }
+];
+// Labels that are valid but NOT on the numbered route tree. Flag football
+// has NO BLOCKING — any player who doesn't run a route past the line of
+// scrimmage is either taking the snap (QB), handling the ball behind the LOS
+// (a run action), or catching a short/screen pass at or behind the LOS.
+// The labeler may emit these for such positions.
+const NON_ROUTE_LABELS = ['Snap','Handoff','Run','Sweep','Reverse','Pitch','Screen','Drag','Wheel'];
+const NON_ROUTE_DESC = {
+  Snap: 'Take the snap and drop back to pass (no downfield route).',
+  Handoff: 'Receive the handoff from the QB behind the line of scrimmage.',
+  Run: 'Carry the ball on a designed run starting behind the LOS.',
+  Sweep: 'Sweep wide with the ball behind the LOS before turning upfield.',
+  Reverse: 'Take the ball on a reverse handoff behind the LOS.',
+  Pitch: 'Take a pitch from the QB behind the LOS.',
+  Screen: 'Catch a short screen pass at or behind the LOS.',
+  Drag: 'Shallow crossing route underneath past the LOS.',
+  Wheel: 'Flare out and then up the sideline past the LOS.'
 };
 
 let deStage = null;
@@ -4337,9 +4416,11 @@ Mark new plays with isNew: true.
 For every new PASS play, you MUST include primaryTarget (W, X, Y, Z, or C). For RUN plays, set primaryTarget to the ball carrier.
 
 FORMATIONS available: Spread, Trips Right, Trips Left, Bunch Right, Bunch Left, Twins, Deuce
-ROUTE PRESETS available: Slant, Out, In, Go, Post, Corner, Curl, Drag, Wheel, Flat, Screen, Block
+ROUTE PRESETS available: Slant, Out, In, Go, Post, Corner, Curl, Drag, Wheel, Flat, Screen
+CRITICAL RULE — NO BLOCKING: Flag football does not allow blocking. Never use "Block" as a route preset or action. Every non-QB player either runs a route past the LOS or handles the ball behind the LOS as a ball carrier.
+CRITICAL RULE — BEHIND THE LOS IS A RUN, NOT A ROUTE: If a player receives the ball at or behind the line of scrimmage (handoff, pitch, sweep, reverse, or bubble screen) they are running, not running a route. Use a run action (Handoff / Sweep / Reverse / Pitch) in the route description for those players, not a route tree label. Only use a route preset (Slant / Out / Go / Post / Corner / Curl / Drag / Wheel / Flat / Screen / In) for a player who releases downfield past the LOS as a pass target.
 For the QB position, always use "Snap" for pocket passing (no route drawn). QB CANNOT run past the LOS — never design QB run plays.
-For the Center, almost always use "Block".
+For the Center, pick a short route like Slant, Drag, Curl, or Flat — the Center snaps the ball and then releases as a receiver.
 
 You MUST include "formation" and "routePresets" for every new play.` : 'MODE: Only select plays from the existing playbook. Do NOT invent new plays.'}
 
@@ -4367,8 +4448,8 @@ ${mode === 'suggest' ? `For new plays, use this format:
   "description": "Brief play concept description",
   "formation": "Spread",
   "primaryTarget": "X",
-  "routePresets": {"C":"Block","Q":"Snap","W":"Go","X":"Screen","Y":"Drag","Z":"Slant"},
-  "routes": {"C":"Snap and block left","Q":"Drop back, read screen","W":"Go route","X":"Screen route - settle in flat","Y":"Crossing route","Z":"Slant across middle"}
+  "routePresets": {"C":"Slant","Q":"Snap","W":"Go","X":"Screen","Y":"Drag","Z":"Curl"},
+  "routes": {"C":"Snap then release on a quick slant","Q":"Drop back, read screen","W":"Go route","X":"Screen route - settle in flat","Y":"Crossing route","Z":"Curl back to QB"}
 }` : ''}
 
 Generate a block of 3-5 plays sequenced strategically.`;
@@ -4437,6 +4518,253 @@ async function callOllamaCloud(systemPrompt, userMessage, settings) {
     throw new Error('Ollama Cloud error (' + resp.status + '): ' + (errText || 'Unknown error'));
   }
   return parseOllamaResponse(await resp.text());
+}
+
+// ============= ROUTE LABELING =============
+// Multimodal variant of callOllamaCloud that sends a base64 JPEG alongside
+// the text prompt via Ollama's per-message `images` field. The ai-proxy
+// edge function is a passthrough, so no server changes are required.
+async function callOllamaCloudWithImage(systemPrompt, userMessage, base64Jpeg, settings) {
+  const endpoint = settings.ollamaCloud.endpoint || 'http://localhost:11434';
+  const modelId = settings.ollamaCloud.model || 'gemini-3-flash-preview:cloud';
+  // Strip any `data:image/...;base64,` prefix — Ollama expects raw base64.
+  const img = (base64Jpeg || '').replace(/^data:[^;]+;base64,/, '');
+  // Thinking is explicitly disabled for labeling to keep per-play latency
+  // short (<10s vs 30-40s with thinking). Labels are a simple classification
+  // task — the model doesn't need a reasoning pass.
+  const reqBody = {
+    model: modelId,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user',   content: userMessage, images: [img] }
+    ],
+    stream: false,
+    format: 'json',
+    think: false,
+    options: {
+      temperature: settings.ollamaCloud.temperature != null ? settings.ollamaCloud.temperature : 0.1,
+      num_ctx: settings.ollamaCloud.numCtx || 8192
+    }
+  };
+  const isLocalEndpoint = !endpoint || endpoint.includes('localhost') || endpoint.includes('127.0.0.1');
+  const cloudEndpoint = isLocalEndpoint ? 'https://ollama.com' : endpoint.replace(/\/+$/, '');
+  const proxyUrl = settings.proxyUrl || SUPABASE_URL + '/functions/v1/ai-proxy';
+  const resp = await fetch(proxyUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
+    body: JSON.stringify({ provider: 'ollama', endpoint: cloudEndpoint, ollamaBody: reqBody })
+  });
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '');
+    console.error('Ollama Cloud (image) response status:', resp.status, 'body:', errText);
+    if (resp.status === 503) throw new Error('Server is missing the Ollama Cloud API key. Set OLLAMA_CLOUD_API_KEY in Supabase → Edge Functions → Manage secrets.');
+    if (resp.status === 401 || resp.status === 403) throw new Error('Ollama API key is invalid or expired. Update OLLAMA_CLOUD_API_KEY in your Supabase dashboard.');
+    throw new Error('Ollama Cloud error (' + resp.status + '): ' + (errText || 'Unknown error'));
+  }
+  return parseOllamaResponse(await resp.text());
+}
+
+// Validate and canonicalize an AI-produced route-label object. Accepts any
+// of: a raw JSON string, an object, or a string wrapped in markdown fences.
+// Returns { C, Q, W, X, Y, Z } with each value being a canonical ROUTE_TREE
+// name, a NON_ROUTE_LABELS value, or '' if unrecognized.
+function parseRouteLabels(raw) {
+  let obj = raw;
+  if (typeof raw === 'string') {
+    let s = raw.trim();
+    // Strip ```json ... ``` fences if present
+    s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+    // If there's text around the JSON, try to extract the outermost {...}
+    const first = s.indexOf('{');
+    const last  = s.lastIndexOf('}');
+    if (first !== -1 && last !== -1 && last > first) s = s.slice(first, last + 1);
+    try { obj = JSON.parse(s); }
+    catch(e) { throw new Error('Route-label response was not valid JSON: ' + raw.slice(0, 200)); }
+  }
+  if (!obj || typeof obj !== 'object') throw new Error('Route-label response was not an object');
+  const valid = new Set([
+    ...ROUTE_TREE.map(r => r.name.toLowerCase()),
+    ...NON_ROUTE_LABELS.map(n => n.toLowerCase())
+  ]);
+  const canon = new Map();
+  ROUTE_TREE.forEach(r => canon.set(r.name.toLowerCase(), r.name));
+  NON_ROUTE_LABELS.forEach(n => canon.set(n.toLowerCase(), n));
+  const out = {};
+  ['C','Q','W','X','Y','Z'].forEach(pos => {
+    // Match either the upper-case position key or a lowercase variant.
+    const v = obj[pos] != null ? obj[pos] : (obj[pos.toLowerCase()] != null ? obj[pos.toLowerCase()] : '');
+    if (typeof v !== 'string') { out[pos] = ''; return; }
+    // Accept "Post (8)" style too — strip trailing parens.
+    const cleaned = v.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
+    out[pos] = valid.has(cleaned) ? canon.get(cleaned) : '';
+  });
+  return out;
+}
+
+// One-shot AI labeling for a single play. Reads the play's embedded diagram
+// image and classifies each position (C/Q/W/X/Y/Z) as a route-tree name or
+// a non-route action. Writes `play.routeLabels` in place; the caller is
+// responsible for savePlays().
+async function labelPlayRoutes(play) {
+  const img = diagrams[play.type];
+  if (!img) throw new Error('No diagram available for ' + play.type);
+  const treeList = ROUTE_TREE.map(r => '  ' + r.n + '. ' + r.name + ' — ' + r.desc).join('\n');
+  const systemPrompt =
+    'You are a flag-football route-tree classifier. You will be shown a play ' +
+    'diagram. The offense has 6 positions: C (center), Q (quarterback), ' +
+    'W, X, Y, Z (receivers and running backs). For each position, output a ' +
+    'single label from the lists below.\n\n' +
+    'Receiver route tree (use the NAME only, not the number):\n' + treeList + '\n\n' +
+    'Non-route labels: ' + NON_ROUTE_LABELS.join(', ') + '.\n\n' +
+    'CRITICAL RULES for flag football:\n' +
+    '1. NO BLOCKING. "Block" is NOT a valid label. Every player either runs a ' +
+    'route past the line of scrimmage, takes the snap, or handles the ball ' +
+    'behind the LOS as a runner.\n' +
+    '2. BEHIND THE LINE OF SCRIMMAGE = RUN, NOT ROUTE. If a player receives ' +
+    'the ball at or behind the LOS (handoff, pitch, sweep, reverse, or ' +
+    'bubble screen), label them with a run action (Handoff, Run, Sweep, ' +
+    'Reverse, or Pitch) — NOT a route-tree name — even if they then cross ' +
+    'the LOS with the ball. Only use a route-tree name for a player who ' +
+    'releases downfield past the LOS as a pass target.\n' +
+    '3. Use "Snap" for the QB on pass plays (drops back to throw). For ' +
+    'handoff/pitch plays the QB is still labeled "Snap" since the QB ' +
+    'cannot run past the LOS in flag football.\n' +
+    '4. The Center snaps and then releases as a receiver — give the Center ' +
+    'a route-tree label (commonly Slant, Drag, Curl, or Flat).\n' +
+    '5. "Screen" is a short pass caught AT or BEHIND the LOS; use it only ' +
+    'for bubble/smoke/quick screens.\n' +
+    '6. Match receivers to the closest route-tree shape based on their arrow.\n\n' +
+    'Output ONLY a JSON object of the form ' +
+    '{"C":"...","Q":"...","W":"...","X":"...","Y":"...","Z":"..."}. ' +
+    'No prose, no explanation, no markdown.';
+  const userMessage = 'Play #' + play.num + ': "' + play.type + '"' +
+    (play.variation ? ' (' + play.variation + ')' : '') +
+    '. Classify each position from the diagram.';
+  const settings = loadAISettings();
+  // Force Ollama Cloud + Gemini Flash Preview for this task regardless of
+  // the user's currently-saved provider — they explicitly asked for it.
+  const cloudSettings = {
+    ...settings,
+    provider: 'ollama-cloud',
+    ollamaCloud: {
+      ...(settings.ollamaCloud || {}),
+      endpoint: (settings.ollamaCloud && settings.ollamaCloud.endpoint) || 'http://localhost:11434',
+      model: 'gemini-3-flash-preview:cloud',
+      thinking: false,
+      temperature: 0.1,
+      numCtx: (settings.ollamaCloud && settings.ollamaCloud.numCtx) || 8192
+    }
+  };
+  const raw = await callOllamaCloudWithImage(systemPrompt, userMessage, img, cloudSettings);
+  const labels = parseRouteLabels(raw);
+  play.routeLabels = labels;
+  return labels;
+}
+
+// Progress indicator for labelAllPlays — rewrites the batch button's text.
+function updateLabelingProgress(i, total, playName) {
+  const btn = document.getElementById('labelAllBtn');
+  if (!btn) return;
+  if (i == null) {
+    btn.disabled = false;
+    btn.textContent = 'Label routes for all plays (AI)';
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Labeling ' + i + '/' + total + ' — ' + playName + '…';
+}
+
+// Sequentially label every play. Saves after each success so partial progress
+// survives a reload. Reports a summary alert at the end.
+async function labelAllPlays() {
+  if (!confirm('Use AI (Ollama Cloud / Gemini 3 Flash Preview) to classify routes for all ' + plays.length + ' plays? This will overwrite any existing route labels.')) return;
+  const failures = [];
+  let done = 0;
+  for (let i = 0; i < plays.length; i++) {
+    const play = plays[i];
+    updateLabelingProgress(i + 1, plays.length, play.type);
+    try {
+      await labelPlayRoutes(play);
+      savePlays();
+      done++;
+    } catch (e) {
+      console.error('labelPlayRoutes failed for ' + play.type + ':', e);
+      failures.push(play.type + ' — ' + (e.message || e));
+    }
+  }
+  updateLabelingProgress(null);
+  if (failures.length === 0) {
+    alert('Labeled ' + done + '/' + plays.length + ' plays. 0 failures.');
+  } else {
+    alert('Labeled ' + done + '/' + plays.length + ' plays.\n\nFailures:\n- ' + failures.join('\n- '));
+  }
+}
+
+// Build an inline SVG diagram of the 9-route receiver tree with the named
+// route highlighted. Coordinates use a 0..1 normalized space relative to
+// the origin (receiver) at the bottom center; downfield is up (negative y).
+function buildRouteTreeSvg(highlightName) {
+  const W = 260, H = 240;
+  const ox = W / 2;             // origin x (receiver position)
+  const oy = H - 24;             // origin y (near the bottom)
+  const scaleX = (W - 40) / 2;   // horizontal half-range
+  const scaleY = (H - 40);       // vertical range (downfield)
+  const proj = p => ({ x: ox + p.x * scaleX, y: oy + p.y * scaleY });
+  // Background field lines
+  let svg = '<svg class="route-info-svg" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
+  for (let i = 1; i < 5; i++) {
+    const yy = oy - (scaleY / 5) * i;
+    svg += '<line x1="12" y1="' + yy + '" x2="' + (W - 12) + '" y2="' + yy + '" stroke="rgba(128,128,128,0.2)" stroke-dasharray="4 4" stroke-width="1"/>';
+  }
+  // Route lines
+  ROUTE_TREE.forEach(r => {
+    const selected = r.name.toLowerCase() === String(highlightName || '').toLowerCase();
+    const cls = 'rt-route' + (selected ? ' rt-selected' : '');
+    const pts = [{ x: 0, y: 0 }, ...r.vec].map(proj);
+    let d = 'M ' + pts[0].x + ' ' + pts[0].y;
+    for (let i = 1; i < pts.length; i++) d += ' L ' + pts[i].x + ' ' + pts[i].y;
+    svg += '<path class="' + cls + '" d="' + d + '" stroke-linecap="round" stroke-linejoin="round"/>';
+    // Arrowhead at tip — simple triangle
+    const tip = pts[pts.length - 1];
+    const prev = pts[pts.length - 2];
+    const ang = Math.atan2(tip.y - prev.y, tip.x - prev.x);
+    const ah = 6;
+    const a1 = { x: tip.x - ah * Math.cos(ang - Math.PI / 7), y: tip.y - ah * Math.sin(ang - Math.PI / 7) };
+    const a2 = { x: tip.x - ah * Math.cos(ang + Math.PI / 7), y: tip.y - ah * Math.sin(ang + Math.PI / 7) };
+    svg += '<path class="' + cls + '" d="M ' + tip.x + ' ' + tip.y + ' L ' + a1.x + ' ' + a1.y + ' M ' + tip.x + ' ' + tip.y + ' L ' + a2.x + ' ' + a2.y + '" stroke-linecap="round"/>';
+    // Label near the tip
+    const labelX = tip.x + (tip.x < ox ? -4 : 4);
+    const labelY = tip.y - 4;
+    const anchor = tip.x < ox ? 'end' : 'start';
+    svg += '<text class="rt-label' + (selected ? ' rt-selected' : '') + '" x="' + labelX + '" y="' + labelY + '" text-anchor="' + anchor + '">' + r.name + ' (' + r.n + ')</text>';
+  });
+  // Origin marker (receiver)
+  svg += '<circle class="rt-origin" cx="' + ox + '" cy="' + oy + '" r="5"/>';
+  svg += '<text x="' + ox + '" y="' + (oy + 16) + '" text-anchor="middle" font-size="11" font-weight="700" fill="var(--text2)">X</text>';
+  svg += '</svg>';
+  return svg;
+}
+
+// Show a modal describing the route a given position runs on the current play.
+// Called from the pos-cell pill in showPlay().
+function showRouteInfo(pos, label) {
+  const pc = (typeof posColors !== 'undefined' && posColors[pos]) ? posColors[pos] : null;
+  const color = pc ? pc.color : 'var(--accent)';
+  const treeMatch = ROUTE_TREE.find(r => r.name.toLowerCase() === String(label).toLowerCase());
+  const isRoute = !!treeMatch;
+  const title = isRoute ? (treeMatch.name + ' (' + treeMatch.n + ')') : label;
+  const desc = isRoute ? treeMatch.desc : (NON_ROUTE_DESC[label] || 'Non-route action.');
+  let html = '<div class="route-info-modal">';
+  html += '<div class="route-info-header">';
+  html += '<div class="ri-pos" style="background:' + color + ';">' + pos + '</div>';
+  html += '<h3>' + title + '</h3>';
+  html += '</div>';
+  html += '<div class="route-info-desc">' + desc + '</div>';
+  if (isRoute) html += buildRouteTreeSvg(treeMatch.name);
+  html += '<button class="route-info-close" onclick="document.getElementById(\'modalOverlay\').classList.remove(\'active\');">Close</button>';
+  html += '</div>';
+  document.getElementById('modalBox').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('active');
 }
 
 async function callOllamaLocal(systemPrompt, userMessage, settings) {
@@ -4619,6 +4947,15 @@ function renderAI() {
 
   // Generate button
   html += '<button class="ai-generate-btn" onclick="generatePlayBlock()"' + (disableGenerate ? ' disabled' : '') + '>Generate Play Block</button>';
+
+  // Batch route-labeling button — uses Ollama Cloud + Gemini 3 Flash Preview
+  // regardless of the saved provider, so it only needs the server-side
+  // Ollama Cloud key to be configured.
+  const cloudReady = aiConfigStatus && aiConfigStatus.ollamaCloud;
+  html += '<button id="labelAllBtn" class="ai-generate-btn" style="background:var(--surface2);color:var(--text);margin-top:8px;" onclick="labelAllPlays()"' + (cloudReady ? '' : ' disabled') + '>Label routes for all plays (AI)</button>';
+  if (!cloudReady) {
+    html += '<div style="padding:4px 16px 0;font-size:11px;color:var(--text2);">Needs Ollama Cloud API key configured on the server.</div>';
+  }
 
   // Results area
   html += '<div id="aiResultsArea"></div>';
