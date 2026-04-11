@@ -1855,11 +1855,11 @@ function showLineupPicker(pos) {
       const takenByPos = otherPositions.find(op => teamLineup[op] === lastName);
       if (takenByPos && !isCurrent) {
         html += `<li style="opacity:0.4;cursor:default;pointer-events:none;">
-          <span>${lastName} <span style="font-size:12px;color:var(--text2);">(at ${takenByPos})</span></span>
+          <span>${p.name} <span style="font-size:12px;color:var(--text2);">(at ${takenByPos})</span></span>
           <span class="picker-num">${p.number ? '#' + p.number : ''}</span></li>`;
       } else {
         html += `<li class="${isCurrent ? 'picker-current' : ''}" onclick="assignLineupPlayer('${pos}','${lastName}')">
-          <span>${lastName}</span>
+          <span>${p.name}</span>
           <span class="picker-num">${p.number ? '#' + p.number : ''}</span></li>`;
       }
     });
