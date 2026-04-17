@@ -4304,6 +4304,20 @@ function buildAIPrompt(defense, mode, gameId) {
 
   const systemPrompt = `You are an expert youth flag football offensive coordinator for Under the Lights 6v6 (1st–2nd grade, no-rush division). You analyze defensive schemes and create strategic play sequences that are LEGAL under these rules.
 
+========================================
+NON-NEGOTIABLE RULES (read before anything else — every play you output MUST obey these)
+========================================
+1. AGE / DIVISION: This is GRADES 1–2 (ages ~6–8), Under the Lights 6v6 NO-RUSH division. Design reads, depths, and concepts for 6–8 year olds — NOT high-school or adult football.
+2. NO DEFENSIVE RUSH: Defenders CANNOT rush the QB. Do NOT design plays that "beat the rush," use hot routes vs blitz, chip a rusher, or call screens to slow a rush. Pass protection is NOT a concept in this league.
+3. NO QB RUN PAST THE LOS: The QB may NEVER run across the line of scrimmage. Never design QB scrambles, QB draws, QB sneaks, QB keepers, bootlegs that cross the LOS, or RPOs where the QB keeps and runs. The QB either throws or hands off / pitches behind the LOS.
+4. ABSOLUTELY NO BLOCKING — for ANY position, including the Center:
+   - Flag football does not allow blocking, screening, chipping, sealing, walling-off, shielding, picking, pass-pro, cut blocks, or any contact-based assignment.
+   - The Center is NOT a blocker. After snapping, the Center RELEASES as a receiver on a short route (Slant, Drag, Curl, Flat, or In) — exactly like any other eligible receiver.
+   - Every non-QB player on every play must do ONE of: (a) run a pass route past the LOS, (b) handle the ball behind the LOS as a ball carrier (handoff, sweep, reverse, pitch, bubble), or (c) catch a short/screen pass. Nothing else.
+   - Route descriptions MUST NOT contain any of these banned words: block, blocker, blocking, chip, chips, seal, sealing, wall off, wall-off, shield, pass pro, pass-pro, pass protect, pick (as a contact action), screen block, release block, kick out, down block, lead block. If you catch yourself typing any of these, REWRITE that player's assignment as a real route or ball-carrier action.
+5. MOTION IS ENCOURAGED AND MUST BE SHOWN PRE-SNAP: Max 1 player in motion at the snap; motion must be parallel to the LOS or moving backward — NEVER toward the LOS. When you design a new play that uses motion, you MUST fill in the "motion" field in the JSON (see OUTPUT FORMAT) so the app can animate the motion before the snap.
+========================================
+
 LEAGUE RULES — Under the Lights 6v6 (Grades 1–2, No-Rush):
 
 GAME FORMAT:
@@ -4336,12 +4350,14 @@ RUN vs PASS CONSTRAINTS (CRITICAL — MUST FOLLOW):
 - Lateral passes (backward/parallel) are allowed at any time
 - Illegal run: 5 yards, loss of down
 
-BLOCKING & CONTACT (STRICTLY PROHIBITED):
-- No blocking of any kind — no physical blocking, no screening
+BLOCKING & CONTACT (STRICTLY PROHIBITED — SEE NON-NEGOTIABLE RULE #4):
+- No blocking of any kind — no physical blocking, no screening, no chipping, no sealing, no walling off, no picking with contact, no pass protection
+- The Center is NOT a blocker — Center snaps the ball and RELEASES as a receiver
 - No flag guarding or stiff-arming
 - No leaping to avoid a flag pull
 - Blocking penalty: ball at spot of foul, loss of down
 - Flag guarding / stiff arm: 5 yards from spot, loss of down
+- Banned verbs in route descriptions: block, chip, seal, wall off, shield, pass pro, pass protect, pick (contact), screen block, release block, kick out, down block, lead block
 
 DECEPTION / TRICK PLAY LIMITS:
 - No fake substitutions or hidden-ball plays
@@ -4486,17 +4502,25 @@ ${mode === 'suggest' ? `MODE: You may suggest NEW play concepts not in the playb
 - Full route descriptions for each position (C, Q, W, X, Y, Z)
 - The primaryTarget position letter (the key read for the QB)
 - Why this new concept works against the specified defense
+- Optional pre-snap motion (STRONGLY ENCOURAGED — motion is legal and helps young defenses break down)
 Mark new plays with isNew: true.
 For every new PASS play, you MUST include primaryTarget (W, X, Y, Z, or C). For RUN plays, set primaryTarget to the ball carrier.
 
 FORMATIONS available: Spread, Trips Right, Trips Left, Bunch Right, Bunch Left, Twins, Deuce
 ROUTE PRESETS available: Slant, Out, In, Go, Post, Corner, Curl, Drag, Wheel, Flat, Screen
-CRITICAL RULE — NO BLOCKING: Flag football does not allow blocking. Never use "Block" as a route preset or action. Every non-QB player either runs a route past the LOS or handles the ball behind the LOS as a ball carrier.
+CRITICAL RULE — NO BLOCKING (RE-READ IF NEEDED): Flag football does NOT allow blocking, chipping, sealing, walling off, shielding, or pass protection. Never use "Block" as a route preset or action. Every non-QB player either runs a route past the LOS or handles the ball behind the LOS as a ball carrier. If your route description uses the words block/chip/seal/shield/pass-pro/pick-contact, you are WRONG — rewrite it.
+CRITICAL RULE — THE CENTER RELEASES AS A RECEIVER: The Center is NEVER a blocker. After the snap, the Center releases on a short route — pick one of Slant, Drag, Curl, Flat, or In. Never describe the Center as blocking, chipping, shielding, staying in, walling off the middle, or anything similar.
 CRITICAL RULE — BEHIND THE LOS IS A RUN, NOT A ROUTE: If a player receives the ball at or behind the line of scrimmage (handoff, pitch, sweep, reverse, or bubble screen) they are running, not running a route. Use a run action (Handoff / Sweep / Reverse / Pitch) in the route description for those players, not a route tree label. Only use a route preset (Slant / Out / Go / Post / Corner / Curl / Drag / Wheel / Flat / Screen / In) for a player who releases downfield past the LOS as a pass target.
-For the QB position, always use "Snap" for pocket passing (no route drawn). QB CANNOT run past the LOS — never design QB run plays.
+For the QB position, always use "Snap" for pocket passing (no route drawn). QB CANNOT run past the LOS — never design QB run plays (no scrambles, draws, keepers, bootlegs, or sneaks).
 For the Center, pick a short route like Slant, Drag, Curl, or Flat — the Center snaps the ball and then releases as a receiver.
 
-You MUST include "formation" and "routePresets" for every new play.` : 'MODE: Only select plays from the existing playbook. Do NOT invent new plays.'}
+PRE-SNAP MOTION (use when it helps the concept):
+- Exactly one player may be in motion at the snap. Pick ONE of W, X, Y, or Z (never C or Q).
+- Motion must be parallel to the LOS or moving backward — never toward the LOS.
+- Supported motion types: "Jet" (wide sweep across behind QB), "Orbit" (arc behind QB ending same side), "Short" (small 1-2 step shift in or out).
+- Include a short human-readable description so the coach can see what the motion is.
+
+You MUST include "formation" and "routePresets" for every new play. Include "motion" whenever the concept uses pre-snap motion.` : 'MODE: Only select plays from the existing playbook. Do NOT invent new plays.'}
 
 OUTPUT FORMAT — respond with ONLY valid JSON, no markdown fences:
 {
@@ -4516,15 +4540,17 @@ ${mode === 'suggest' ? `For new plays, use this format:
 {
   "order": 2,
   "playNum": null,
-  "playType": "New: Fake Sweep Screen",
+  "playType": "New: Jet Sweep Screen",
   "rationale": "Why this play works",
   "isNew": true,
   "description": "Brief play concept description",
   "formation": "Spread",
   "primaryTarget": "X",
   "routePresets": {"C":"Slant","Q":"Snap","W":"Go","X":"Screen","Y":"Drag","Z":"Curl"},
-  "routes": {"C":"Snap then release on a quick slant","Q":"Drop back, read screen","W":"Go route","X":"Screen route - settle in flat","Y":"Crossing route","Z":"Curl back to QB"}
-}` : ''}
+  "routes": {"C":"Snap then release on a quick slant","Q":"Drop back, read screen","W":"Go route","X":"Screen route - settle in flat","Y":"Crossing route","Z":"Curl back to QB"},
+  "motion": {"player":"Y","type":"Jet","direction":"right","description":"Y jet motion right across behind QB before the snap"}
+}
+The "motion" field is optional. Omit it if the play has no pre-snap motion. If included, player must be W, X, Y, or Z; type must be one of "Jet" / "Orbit" / "Short"; direction must be "left" or "right".` : ''}
 
 Generate a block of 3-5 plays sequenced strategically.`;
 
@@ -5248,13 +5274,16 @@ function drawStar(ctx, cx, cy, outerR, innerR, points) {
 // ============= PLAY ANIMATION ENGINE =============
 let animState = null; // { formation, routePresets, playName, phase, animT, lastT, af, positions, routeT, primaryTarget }
 
-function showPlayAnimation(formation, routePresets, playName, primaryTarget) {
+function showPlayAnimation(formation, routePresets, playName, primaryTarget, motion) {
   const overlay = document.getElementById('animOverlay');
   overlay.classList.add('active');
   document.body.style.overflow = 'hidden';
 
-  const formData = FORMATIONS[formation];
-  if (!formData) return;
+  const origFormData = FORMATIONS[formation];
+  if (!origFormData) return;
+  // Deep-clone so we can mutate the motion player's starting x once motion completes,
+  // without affecting the shared FORMATIONS definition.
+  const formData = JSON.parse(JSON.stringify(origFormData));
 
   // Build legend
   const legend = document.getElementById('animLegend');
@@ -5275,11 +5304,34 @@ function showPlayAnimation(formation, routePresets, playName, primaryTarget) {
   const wrap = canvas.parentElement;
   canvas.width = 800; canvas.height = 580;
 
+  // Validate motion. Only W/X/Y/Z may be in motion; C and Q may not.
+  let validMotion = null;
+  if (motion && motion.player && ['W','X','Y','Z'].indexOf(motion.player) !== -1 && formData[motion.player]) {
+    const type = (motion.type || 'Short');
+    const dir = motion.direction === 'left' ? -1 : 1;
+    // Parallel-to-LOS horizontal shift. Distances tuned to canvas units (800 wide).
+    const magByType = { Jet: 320, Orbit: 220, Short: 120 };
+    const mag = magByType[type] != null ? magByType[type] : 180;
+    const start = formData[motion.player];
+    let endX = start.x + dir * mag;
+    endX = Math.max(40, Math.min(760, endX)); // clamp inside field
+    validMotion = {
+      player: motion.player,
+      type,
+      direction: motion.direction === 'left' ? 'left' : 'right',
+      description: motion.description || '',
+      startX: start.x,
+      endX,
+      y: start.y
+    };
+  }
+
   animState = {
     formation, routePresets, playName, formData, primaryTarget,
+    motion: validMotion,
     phase: 'idle', animT: 0, lastT: 0, af: null,
     positions: {},
-    routeT: 0, snapT: 0
+    routeT: 0, snapT: 0, motionT: 0
   };
   // Init positions
   ['C','Q','W','X','Y','Z'].forEach(pos => {
@@ -5527,9 +5579,26 @@ function animLoop(ts) {
   const dt = (ts - animState.lastT) * animGetSpeed();
   animState.lastT = ts;
 
-  const SNAP_DUR = 400, ROUTE_DUR = 2200;
+  const MOTION_DUR = 1400, SNAP_DUR = 400, ROUTE_DUR = 2200;
 
-  if (animState.phase === 'snap') {
+  if (animState.phase === 'motion') {
+    animState.motionT += dt;
+    const t = Math.min(1, animState.motionT / MOTION_DUR);
+    const m = animState.motion;
+    if (m) {
+      const x = m.startX + (m.endX - m.startX) * t;
+      animState.positions[m.player] = { x, y: m.y };
+    }
+    if (animState.motionT >= MOTION_DUR) {
+      if (m) {
+        // Lock in post-motion position so routes start from the motion end point.
+        animState.formData[m.player] = { x: m.endX, y: m.y };
+        animState.positions[m.player] = { x: m.endX, y: m.y };
+      }
+      animState.phase = 'snap'; animState.snapT = 0;
+      document.getElementById('animPhase').textContent = 'Snap!';
+    }
+  } else if (animState.phase === 'snap') {
     animState.snapT += dt;
     if (animState.snapT >= SNAP_DUR) {
       animState.phase = 'routes'; animState.animT = 0;
@@ -5577,8 +5646,15 @@ function animStart() {
   if (!animState) return;
   if (animState.phase === 'done') { animReset(); setTimeout(animStart, 100); return; }
   if (animState.phase !== 'idle') return;
-  animState.phase = 'snap'; animState.snapT = 0; animState.lastT = 0;
-  document.getElementById('animPhase').textContent = 'Snap!';
+  if (animState.motion) {
+    animState.phase = 'motion'; animState.motionT = 0; animState.lastT = 0;
+    const m = animState.motion;
+    const arrow = m.direction === 'left' ? '\u2190' : '\u2192';
+    document.getElementById('animPhase').textContent = 'Motion ' + arrow + ' (' + m.player + ')';
+  } else {
+    animState.phase = 'snap'; animState.snapT = 0; animState.lastT = 0;
+    document.getElementById('animPhase').textContent = 'Snap!';
+  }
   document.getElementById('animPlayBtn').innerHTML = '&#9654; Running...';
   animState.af = requestAnimationFrame(animLoop);
 }
@@ -5586,7 +5662,12 @@ function animStart() {
 function animReset() {
   if (!animState) return;
   if (animState.af) cancelAnimationFrame(animState.af);
-  animState.phase = 'idle'; animState.animT = 0; animState.routeT = 0; animState.snapT = 0; animState.lastT = 0;
+  animState.phase = 'idle'; animState.animT = 0; animState.routeT = 0; animState.snapT = 0; animState.motionT = 0; animState.lastT = 0;
+  // Restore motion player's pre-motion starting x so replay shows motion again.
+  if (animState.motion) {
+    const m = animState.motion;
+    animState.formData[m.player] = { x: m.startX, y: m.y };
+  }
   ['C','Q','W','X','Y','Z'].forEach(pos => {
     if (animState.formData[pos]) animState.positions[pos] = { x: animState.formData[pos].x, y: animState.formData[pos].y };
   });
@@ -5651,6 +5732,12 @@ function showAIResults(result) {
     if (b.isNew && b.routes) {
       html += '<div class="ai-new-play-routes">';
       if (b.description) html += '<div style="margin-bottom:4px;color:var(--text);font-weight:600;">' + b.description + '</div>';
+      if (b.motion && b.motion.player) {
+        const mt = b.motion.type || 'Motion';
+        const md = b.motion.direction || '';
+        const mdesc = b.motion.description || (mt + ' ' + md);
+        html += '<div class="route-item" style="background:rgba(255,200,0,0.08);"><span class="route-pos" style="background:#d4a017;">PRE-SNAP</span><span>Motion: ' + b.motion.player + ' — ' + mdesc + '</span></div>';
+      }
       ['C','Q','W','X','Y','Z'].forEach(pos => {
         if (b.routes[pos]) {
           html += '<div class="route-item"><span class="route-pos">' + pos + '</span><span>' + b.routes[pos] + '</span></div>';
@@ -5697,7 +5784,7 @@ function animateAIPlay(blockIndex) {
   if (!aiCurrentResult || !aiCurrentResult.block || !aiCurrentResult.block[blockIndex]) return;
   const b = aiCurrentResult.block[blockIndex];
   if (b.formation && b.routePresets) {
-    showPlayAnimation(b.formation, b.routePresets, b.playType, b.primaryTarget);
+    showPlayAnimation(b.formation, b.routePresets, b.playType, b.primaryTarget, b.motion);
   }
 }
 
@@ -5723,6 +5810,7 @@ function addAIPlayToPlaybook(blockIndex) {
     Z: '',
     routeDescriptions: b.routes ? JSON.stringify(b.routes) : '',
     target: b.primaryTarget || '',
+    motion: b.motion || null,
     row: 0
   };
 
