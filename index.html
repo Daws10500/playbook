@@ -2214,18 +2214,25 @@ function showPlay(num) {
   const diag = document.getElementById('diagramSection');
   const customImg = play.customDiagram;
   const builtinImg = diagrams[play.type];
+  const canAnimate = !!(play.formation && play.routePresets && FORMATIONS[play.formation]);
+  const animateBtn = canAnimate
+    ? `<button class="diagram-edit-btn" style="background:var(--accent);color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;" onclick="animatePlayFromPlaybook(${play.num})">&#9654; Animate</button>`
+    : '';
   if (customImg) {
     const isJpeg = !customImg.startsWith('iVBOR');
     const mime = isJpeg ? 'image/jpeg' : 'image/png';
-    const editDiagBtn = play.diagramData ? `<div style="text-align:center;margin-top:8px;"><button class="diagram-edit-btn" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;" onclick="editPlay(${play.num});setTimeout(()=>openDiagramEditor(plays.find(p=>p.num===${play.num}).diagramData),100)">Edit Diagram</button></div>` : '';
+    const editDiagBtn = play.diagramData ? `<button class="diagram-edit-btn" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;" onclick="editPlay(${play.num});setTimeout(()=>openDiagramEditor(plays.find(p=>p.num===${play.num}).diagramData),100)">Edit Diagram</button>` : '';
+    const actionRow = (animateBtn || editDiagBtn) ? `<div style="text-align:center;margin-top:8px;display:flex;gap:8px;justify-content:center;">${animateBtn}${editDiagBtn}</div>` : '';
     diag.innerHTML = `<div class="diagram-label">${play.type} <span class="diagram-badge custom">Custom</span></div>
-      <img class="diagram-img" src="data:${mime};base64,${customImg}" alt="${play.type} diagram">${editDiagBtn}`;
+      <img class="diagram-img" src="data:${mime};base64,${customImg}" alt="${play.type} diagram">${actionRow}`;
   } else if (builtinImg) {
     const builtinMime = builtinImg.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
+    const actionRow = animateBtn ? `<div style="text-align:center;margin-top:8px;">${animateBtn}</div>` : '';
     diag.innerHTML = `<div class="diagram-label">${play.type} <span class="diagram-badge builtin">Formation</span></div>
-      <img class="diagram-img" src="data:${builtinMime};base64,${builtinImg}" alt="${play.type} diagram">`;
+      <img class="diagram-img" src="data:${builtinMime};base64,${builtinImg}" alt="${play.type} diagram">${actionRow}`;
   } else {
-    diag.innerHTML = '<div class="diagram-label">No diagram available</div>';
+    const actionRow = animateBtn ? `<div style="text-align:center;margin-top:8px;">${animateBtn}</div>` : '';
+    diag.innerHTML = '<div class="diagram-label">No diagram available</div>' + actionRow;
   }
   const idx = plays.findIndex(p => p.num === num);
   const prev = idx > 0 ? plays[idx-1] : null;
@@ -3602,6 +3609,11 @@ function showGamePlayDetail(idx) {
     const mime = builtinImg.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
     html += `<div class="seq-diagram-section">
       <img src="data:${mime};base64,${builtinImg}" alt="${name}">
+    </div>`;
+  }
+  if (play && play.formation && play.routePresets && FORMATIONS[play.formation]) {
+    html += `<div style="text-align:center;padding:0 16px 4px;">
+      <button class="nav-btn" style="background:var(--accent);color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;" onclick="animatePlayFromPlaybook(${play.num})">&#9654; Animate Play</button>
     </div>`;
   }
 
@@ -5788,10 +5800,30 @@ function animateAIPlay(blockIndex) {
   }
 }
 
+// Animate a saved play from the Plays detail page or from inside a game.
+// Works for any play that has formation + routePresets persisted (currently
+// plays added from the AI generator).
+function animatePlayFromPlaybook(playNum) {
+  const play = plays.find(p => p.num === playNum);
+  if (!play || !play.formation || !play.routePresets || !FORMATIONS[play.formation]) return;
+  showPlayAnimation(play.formation, play.routePresets, play.type, play.target, play.motion);
+}
+
 function addAIPlayToPlaybook(blockIndex) {
   if (!aiCurrentResult || !aiCurrentResult.block || !aiCurrentResult.block[blockIndex]) return;
   const b = aiCurrentResult.block[blockIndex];
   if (!b.isNew) return;
+
+  // Defensive re-render — if the diagram wasn't built during showAIResults
+  // (e.g., the result was loaded from history), build it now so the play
+  // always has an image when it lands in the playbook.
+  if (!b._diagramBase64 && b.formation && b.routePresets) {
+    const diagResult = renderNewPlayDiagram(b.formation, b.routePresets, b.playType, b.primaryTarget);
+    if (diagResult) {
+      b._diagramBase64 = diagResult.imageBase64;
+      b._diagramData = diagResult.diagramData;
+    }
+  }
 
   const nextNum = plays.length > 0 ? Math.max(...plays.map(p => p.num)) + 1 : 1;
   const playName = b.playType.replace(/^New:\s*/, '');
@@ -5810,6 +5842,11 @@ function addAIPlayToPlaybook(blockIndex) {
     Z: '',
     routeDescriptions: b.routes ? JSON.stringify(b.routes) : '',
     target: b.primaryTarget || '',
+    // Persist the fields the canvas animation needs so the Animate button
+    // works from the Plays detail page and inside a Game, not just from the
+    // ephemeral AI results card.
+    formation: b.formation || null,
+    routePresets: b.routePresets || null,
     motion: b.motion || null,
     row: 0
   };
