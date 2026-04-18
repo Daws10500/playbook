@@ -5460,14 +5460,29 @@ function showPlayAnimation(formation, routePresets, playName, primaryTarget, mot
   //   (2) The motion player ENDS on the opposite side of center (x=400),
   //       i.e. motion always switches the strength of the formation. This
   //       matches how youth flag motion is actually used.
+  // Normalize action up-front so motion landing can depend on run vs pass.
+  const normalizedAction = normalizeAIAction(action, playName);
+  const isRunAction = normalizedAction === 'sweep' || normalizedAction === 'reverse';
+
   let validMotion = null;
   if (motion && motion.player && ['W','X','Y','Z'].indexOf(motion.player) !== -1 && formData[motion.player]) {
     const type = (motion.type || 'Jet');
     const start = formData[motion.player];
 
-    // (2) End on the opposite side of the center line by mirroring across x=400.
+    // (2) End on the opposite side of the center line.
+    // For passes we mirror across center (deception via strength flip). For
+    // runs (sweep/reverse) we land the motion player just past the QB on the
+    // opposite side — far enough to still switch strength, close enough that
+    // the snap-time handoff is a real exchange instead of a 300px football
+    // flight across open backfield.
     const CENTER_X = 400;
-    let endX = 2 * CENTER_X - start.x;
+    let endX;
+    if (isRunAction && formData.Q) {
+      const side = start.x < CENTER_X ? 1 : -1;   // opposite side from start
+      endX = formData.Q.x + 35 * side;
+    } else {
+      endX = 2 * CENTER_X - start.x;
+    }
     endX = Math.max(40, Math.min(760, endX));
 
     // (1) Motion lane sits behind the QB (deepest offensive player).
@@ -5493,7 +5508,7 @@ function showPlayAnimation(formation, routePresets, playName, primaryTarget, mot
   animState = {
     formation, routePresets, playName, formData, primaryTarget,
     motion: validMotion,
-    action: normalizeAIAction(action, playName),
+    action: normalizedAction,
     phase: 'idle', animT: 0, lastT: 0, af: null,
     positions: {},
     routeT: 0, snapT: 0, motionT: 0
