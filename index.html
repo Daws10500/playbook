@@ -871,6 +871,18 @@
     background:var(--accent); border-color:var(--accent); color:#fff;
   }
   .ai-mode-btn:active { transform:scale(0.97); }
+  .ai-action-chips {
+    display:flex; flex-wrap:wrap; gap:6px; padding:0 16px 12px;
+  }
+  .ai-action-chip {
+    background:var(--surface2); color:var(--text); border:1px solid var(--border);
+    padding:6px 10px; border-radius:14px; font-size:12px; font-weight:600;
+    cursor:pointer; transition:all .15s;
+  }
+  .ai-action-chip.active {
+    background:var(--accent); color:#fff; border-color:var(--accent);
+  }
+  .ai-action-chip:active { transform:scale(0.97); }
   .ai-generate-btn {
     display:block; width:calc(100% - 32px); margin:4px 16px 16px; padding:14px;
     border-radius:10px; border:none; font-size:15px; font-weight:700;
@@ -2789,6 +2801,29 @@ const FORMATIONS = {
   'Deuce': { C:{x:400,y:480}, Q:{x:400,y:560}, W:{x:120,y:440}, X:{x:680,y:440}, Y:{x:320,y:500}, Z:{x:480,y:500} },
 };
 
+// ============= PLAY ACTIONS =============
+// Mirror of youth_flag_football_knowledge.yaml -> play_actions. Keep them in
+// sync when adding/removing entries. `prompt` is the short, precise rule
+// injected into the system prompt when the coach picks the tag. `bucket`
+// classifies the action as pass / run / trick for the play-type filter.
+const PLAY_ACTIONS = [
+  { id:'drop_back',    label:'Drop-Back Pass',    bucket:'pass',  prompt:'Drop-Back Pass: QB takes snap, drops back, throws the one legal forward pass from behind the LOS. No fake.' },
+  { id:'play_action',  label:'Play-Action Pass',  bucket:'pass',  prompt:'Play-Action Pass: QB fakes a handoff/pitch to a runner behind the LOS (no contact), then throws the one legal forward pass from behind the LOS.' },
+  { id:'rollout_boot', label:'Roll-Out / Boot',   bucket:'pass',  prompt:'Roll-Out / Boot: QB takes snap (optionally after a fake = classic bootleg) and moves LATERALLY toward a sideline behind the LOS, then throws. QB MUST NOT cross the LOS.' },
+  { id:'sweep',        label:'Sweep',             bucket:'run',   prompt:'Sweep: QB hands off or pitches (backward/parallel) to a W/X/Y/Z runner behind the LOS; runner sweeps wide and turns upfield.' },
+  { id:'reverse',      label:'Reverse',           bucket:'run',   prompt:'Reverse: QB hands off/pitches to runner A one direction; runner A hands off/pitches to runner B the opposite direction, both behind the LOS. Runner B carries forward. Uses both laterals of the 2-lateral cap — no additional pitches.' },
+  { id:'halfback_pass',label:'Halfback Pass',     bucket:'trick', prompt:'Halfback Pass: QB hands off or pitches backward to a runner behind the LOS; the RUNNER (not QB) throws the one legal forward pass from behind the LOS. QB does NOT also throw.' },
+  { id:'double_pass',  label:'Double Pass',       bucket:'trick', prompt:'Double Pass: QB throws a BACKWARD pass (lateral) to a receiver behind the LOS; that receiver throws the one legal forward pass from behind the LOS.' },
+  { id:'flea_flicker', label:'Flea Flicker',      bucket:'trick', prompt:'Flea Flicker: QB hands off/pitches to a runner behind the LOS; runner pitches BACK to the QB; QB throws the one legal forward pass. Uses both laterals of the 2-lateral cap.' },
+  { id:'throwback',    label:'Throwback',         bucket:'trick', prompt:'Throwback: offense flows one way (sweep/boot/rollout); the ball carrier or QB throws the one legal forward pass BACK across the field to a delayed backside receiver. Thrower must be behind the LOS.' },
+  { id:'screen',       label:'Screen / Bubble',   bucket:'pass',  prompt:'Screen / Bubble: short forward pass to a receiver at or just behind the LOS (flat or bubble path); catcher runs. No blocking/screening downfield.' }
+];
+const PLAY_TYPE_FILTERS = [
+  { id:'any',  label:'Any' },
+  { id:'pass', label:'Pass' },
+  { id:'run',  label:'Run' }
+];
+
 const ROUTE_PRESETS = {
   'Slant': { points:[{dx:0,dy:-40},{dx:80,dy:-200}], type:'solid' },
   'Out': { points:[{dx:0,dy:-120},{dx:120,dy:-120}], type:'solid' },
@@ -4084,6 +4119,8 @@ const OLLAMA_LOCAL_RECOMMENDED = [
   { id: 'gemma3:12b', name: 'Gemma3 12B', description: 'Google model, solid all-around performance' }
 ];
 let aiMode = 'existing'; // 'existing' or 'suggest'
+let aiPlayTypeFilter = 'any';   // 'any' | 'pass' | 'run' — filters chip list and constrains AI
+let aiActionTags = new Set();   // selected PLAY_ACTIONS ids (empty = no restriction)
 let aiCurrentResult = null;
 
 function loadOllamaCloudModels() {
@@ -4261,7 +4298,7 @@ async function probeAIConfig(force) {
   return aiConfigStatus;
 }
 
-function buildAIPrompt(defense, mode, gameId) {
+function buildAIPrompt(defense, mode, gameId, playTypeFilter, actionTagIds) {
   // Serialize playbook
   let playbookText = 'PLAYBOOK (' + plays.length + ' plays):\n';
   plays.forEach(p => {
@@ -4314,6 +4351,27 @@ function buildAIPrompt(defense, mode, gameId) {
     }
   }
 
+  // Coach-selected play-type + action-tag constraints (only meaningful in
+  // suggest mode). Injected right after the non-negotiable rules block.
+  let actionConstraints = '';
+  if (mode === 'suggest') {
+    const tagList = Array.from(actionTagIds || []);
+    if (playTypeFilter && playTypeFilter !== 'any') {
+      actionConstraints += '\n\nCOACH-SELECTED PLAY TYPE: ' + playTypeFilter.toUpperCase() +
+        ' — every new play you design must be a ' + playTypeFilter.toUpperCase() +
+        ' concept. Trick plays that end in a forward ' + playTypeFilter +
+        ' count as this type.';
+    }
+    if (tagList.length) {
+      const lines = tagList
+        .map(id => PLAY_ACTIONS.find(a => a.id === id))
+        .filter(Boolean)
+        .map(a => '- ' + a.prompt);
+      actionConstraints += '\n\nCOACH-SELECTED ALLOWED ACTIONS: every new play MUST use EXACTLY ONE of the following action tags. Do NOT design plays outside this list. Put the chosen tag id in an "action" field on each new-play JSON object.\n' + lines.join('\n') +
+        '\nAllowed action ids: ' + tagList.join(', ');
+    }
+  }
+
   const systemPrompt = `You are an expert youth flag football offensive coordinator for Under the Lights 6v6 (1st–2nd grade, no-rush division). You analyze defensive schemes and create strategic play sequences that are LEGAL under these rules.
 
 ========================================
@@ -4327,8 +4385,8 @@ NON-NEGOTIABLE RULES (read before anything else — every play you output MUST o
    - The Center is NOT a blocker. After snapping, the Center RELEASES as a receiver on a short route (Slant, Drag, Curl, Flat, or In) — exactly like any other eligible receiver.
    - Every non-QB player on every play must do ONE of: (a) run a pass route past the LOS, (b) handle the ball behind the LOS as a ball carrier (handoff, sweep, reverse, pitch, bubble), or (c) catch a short/screen pass. Nothing else.
    - Route descriptions MUST NOT contain any of these banned words: block, blocker, blocking, chip, chips, seal, sealing, wall off, wall-off, shield, pass pro, pass-pro, pass protect, pick (as a contact action), screen block, release block, kick out, down block, lead block. If you catch yourself typing any of these, REWRITE that player's assignment as a real route or ball-carrier action.
-5. MOTION IS ENCOURAGED AND MUST BE SHOWN PRE-SNAP: Max 1 player in motion at the snap; motion must be parallel to the LOS or moving backward — NEVER toward the LOS. When you design a new play that uses motion, you MUST fill in the "motion" field in the JSON (see OUTPUT FORMAT) so the app can animate the motion before the snap.
-========================================
+5. MOTION IS ENCOURAGED AND MUST BE SHOWN PRE-SNAP: Max 1 player in motion at the snap; motion must be STRICTLY LATERAL (parallel to the LOS) or moving BACKWARD away from the LOS — the motion player must stay BEHIND the line of scrimmage the entire time and must NEVER cross, touch, or drift toward the LOS during motion. Do not describe motion as "toward the line," "up to the LOS," "into the backfield of the defense," "across the line," or anything that could be read as pre-snap forward movement. When you design a new play that uses motion, you MUST fill in the "motion" field in the JSON (see OUTPUT FORMAT) so the app can animate the motion before the snap.
+========================================${actionConstraints}
 
 LEAGUE RULES — Under the Lights 6v6 (Grades 1–2, No-Rush):
 
@@ -4528,8 +4586,9 @@ For the Center, pick a short route like Slant, Drag, Curl, or Flat — the Cente
 
 PRE-SNAP MOTION (use when it helps the concept):
 - Exactly one player may be in motion at the snap. Pick ONE of W, X, Y, or Z (never C or Q).
-- Motion must be parallel to the LOS or moving backward — never toward the LOS.
+- Motion is STRICTLY LATERAL (parallel to the LOS) or moves BACKWARD away from the LOS. The motion player must remain BEHIND the LOS for the entire motion — they do NOT cross or touch the line of scrimmage pre-snap. The motion player only crosses the LOS after the snap, and only as part of their post-snap route or handoff.
 - Supported motion types: "Jet" (wide sweep across behind QB), "Orbit" (arc behind QB ending same side), "Short" (small 1-2 step shift in or out).
+- Never describe motion using words like "up to the LOS," "toward the line," "across the line pre-snap," "press the LOS," "creep forward," or anything that implies forward motion.
 - Include a short human-readable description so the coach can see what the motion is.
 
 You MUST include "formation" and "routePresets" for every new play. Include "motion" whenever the concept uses pre-snap motion.` : 'MODE: Only select plays from the existing playbook. Do NOT invent new plays.'}
@@ -4558,11 +4617,13 @@ ${mode === 'suggest' ? `For new plays, use this format:
   "description": "Brief play concept description",
   "formation": "Spread",
   "primaryTarget": "X",
+  "action": "screen",
   "routePresets": {"C":"Slant","Q":"Snap","W":"Go","X":"Screen","Y":"Drag","Z":"Curl"},
   "routes": {"C":"Snap then release on a quick slant","Q":"Drop back, read screen","W":"Go route","X":"Screen route - settle in flat","Y":"Crossing route","Z":"Curl back to QB"},
   "motion": {"player":"Y","type":"Jet","direction":"right","description":"Y jet motion right across behind QB before the snap"}
 }
-The "motion" field is optional. Omit it if the play has no pre-snap motion. If included, player must be W, X, Y, or Z; type must be one of "Jet" / "Orbit" / "Short"; direction must be "left" or "right".` : ''}
+The "motion" field is optional. Omit it if the play has no pre-snap motion. If included, player must be W, X, Y, or Z; type must be one of "Jet" / "Orbit" / "Short"; direction must be "left" or "right".
+The "action" field should be one of: drop_back, play_action, rollout_boot, sweep, reverse, halfback_pass, double_pass, flea_flicker, throwback, screen. If the coach supplied an "Allowed Actions" list above, you MUST pick exclusively from that list.` : ''}
 
 Generate a block of 3-5 plays sequenced strategically.`;
 
@@ -5046,6 +5107,31 @@ function renderAI() {
   html += '<button class="ai-mode-btn' + (aiMode === 'suggest' ? ' active' : '') + '" onclick="setAIMode(\'suggest\')">Suggest New</button>';
   html += '</div>';
 
+  // Play-type filter (Any / Pass / Run) — only meaningful in Suggest mode where
+  // the model is actually designing new plays. In Use-My-Playbook mode the AI
+  // can only pick from existing plays, so the extra constraints would just
+  // shrink the already-small candidate set.
+  if (aiMode === 'suggest') {
+    html += '<div class="ai-form-group"><label>Play Type</label>';
+    html += '<div class="ai-mode-toggle">';
+    PLAY_TYPE_FILTERS.forEach(t => {
+      const active = aiPlayTypeFilter === t.id ? ' active' : '';
+      html += '<button class="ai-mode-btn' + active + '" onclick="setAIPlayTypeFilter(\'' + t.id + '\')">' + t.label + '</button>';
+    });
+    html += '</div></div>';
+
+    // Action-tag chips — filtered by play-type bucket. Trick plays are shown
+    // regardless of Pass/Run because they end in the selected type anyway.
+    html += '<div class="ai-form-group"><label>Allowed Actions <span style="font-weight:400;color:var(--text2);font-size:11px;">(leave empty for all)</span></label>';
+    html += '<div class="ai-action-chips">';
+    PLAY_ACTIONS.forEach(a => {
+      if (aiPlayTypeFilter !== 'any' && a.bucket !== aiPlayTypeFilter && a.bucket !== 'trick') return;
+      const active = aiActionTags.has(a.id) ? ' active' : '';
+      html += '<button class="ai-action-chip' + active + '" onclick="toggleAIActionTag(\'' + a.id + '\')">' + a.label + '</button>';
+    });
+    html += '</div></div>';
+  }
+
   // Game context selector
   html += '<div class="ai-form-group"><label>Game Context (optional)</label>';
   html += '<select id="aiGameSelect">';
@@ -5089,9 +5175,26 @@ function renderAI() {
 
 function setAIMode(mode) {
   aiMode = mode;
-  document.querySelectorAll('.ai-mode-btn').forEach(b => b.classList.remove('active'));
-  if (mode === 'existing') document.querySelectorAll('.ai-mode-btn')[0].classList.add('active');
-  else document.querySelectorAll('.ai-mode-btn')[1].classList.add('active');
+  renderAI();
+}
+
+function setAIPlayTypeFilter(id) {
+  aiPlayTypeFilter = id;
+  // Dropping to pass/run could leave a tag from the wrong bucket selected —
+  // prune those so the coach doesn't send a contradictory prompt.
+  if (id !== 'any') {
+    Array.from(aiActionTags).forEach(tagId => {
+      const a = PLAY_ACTIONS.find(p => p.id === tagId);
+      if (a && a.bucket !== id && a.bucket !== 'trick') aiActionTags.delete(tagId);
+    });
+  }
+  renderAI();
+}
+
+function toggleAIActionTag(id) {
+  if (aiActionTags.has(id)) aiActionTags.delete(id);
+  else aiActionTags.add(id);
+  renderAI();
 }
 
 function renderNewPlayDiagram(formation, routePresets, playName, primaryTarget) {
@@ -5317,6 +5420,11 @@ function showPlayAnimation(formation, routePresets, playName, primaryTarget, mot
   canvas.width = 800; canvas.height = 580;
 
   // Validate motion. Only W/X/Y/Z may be in motion; C and Q may not.
+  // Motion is strictly parallel to the LOS AND must stay behind it — the
+  // motion player takes a short step off the LOS at the start of the motion
+  // phase and slides laterally at that backfield y, then breaks into their
+  // route at the snap. This matches real flag-football motion and guarantees
+  // the pre-snap motion never crosses the line of scrimmage.
   let validMotion = null;
   if (motion && motion.player && ['W','X','Y','Z'].indexOf(motion.player) !== -1 && formData[motion.player]) {
     const type = (motion.type || 'Short');
@@ -5327,14 +5435,25 @@ function showPlayAnimation(formation, routePresets, playName, primaryTarget, mot
     const start = formData[motion.player];
     let endX = start.x + dir * mag;
     endX = Math.max(40, Math.min(760, endX)); // clamp inside field
+
+    // In this coordinate system, LOS = min(W/X/Y/Z.y) and higher y values
+    // are further into the backfield. Force the motion path to sit clearly
+    // BEHIND the LOS so the player cannot visually cross it during motion.
+    const losY = Math.min(
+      ...['W','X','Y','Z'].map(p => formData[p] ? formData[p].y : Infinity)
+    );
+    const MOTION_BACK_OFFSET = 28;
+    const motionY = Math.max(start.y, losY + MOTION_BACK_OFFSET);
+
     validMotion = {
       player: motion.player,
       type,
       direction: motion.direction === 'left' ? 'left' : 'right',
       description: motion.description || '',
       startX: start.x,
+      startY: start.y,    // original formation y (on/near LOS)
       endX,
-      y: start.y
+      y: motionY          // clamped backfield y used during motion
     };
   }
 
@@ -5598,8 +5717,21 @@ function animLoop(ts) {
     const t = Math.min(1, animState.motionT / MOTION_DUR);
     const m = animState.motion;
     if (m) {
-      const x = m.startX + (m.endX - m.startX) * t;
-      animState.positions[m.player] = { x, y: m.y };
+      // First 20% of motion: step BACKWARD off the LOS (startY -> motion y).
+      // Remaining 80%: slide laterally at the backfield y. This guarantees
+      // the motion player never crosses (or touches) the LOS during motion.
+      const STEP_OFF = 0.2;
+      let x, y;
+      if (t < STEP_OFF) {
+        const k = t / STEP_OFF;
+        x = m.startX;
+        y = m.startY + (m.y - m.startY) * k;
+      } else {
+        const k = (t - STEP_OFF) / (1 - STEP_OFF);
+        x = m.startX + (m.endX - m.startX) * k;
+        y = m.y;
+      }
+      animState.positions[m.player] = { x, y };
     }
     if (animState.motionT >= MOTION_DUR) {
       if (m) {
@@ -5675,10 +5807,11 @@ function animReset() {
   if (!animState) return;
   if (animState.af) cancelAnimationFrame(animState.af);
   animState.phase = 'idle'; animState.animT = 0; animState.routeT = 0; animState.snapT = 0; animState.motionT = 0; animState.lastT = 0;
-  // Restore motion player's pre-motion starting x so replay shows motion again.
+  // Restore motion player's pre-motion starting position so replay shows
+  // motion again from the formation spot (not the backfield motion y).
   if (animState.motion) {
     const m = animState.motion;
-    animState.formData[m.player] = { x: m.startX, y: m.y };
+    animState.formData[m.player] = { x: m.startX, y: m.startY };
   }
   ['C','Q','W','X','Y','Z'].forEach(pos => {
     if (animState.formData[pos]) animState.positions[pos] = { x: animState.formData[pos].x, y: animState.formData[pos].y };
@@ -5732,6 +5865,11 @@ function showAIResults(result) {
     html += '<div class="ai-result-name">' + b.playType;
     if (b.isNew) html += ' <span class="ai-new-badge">NEW</span>';
     if (b.primaryTarget) html += ' <span class="ai-new-badge" style="background:var(--accent);color:#fff;">★ Target: ' + b.primaryTarget + '</span>';
+    if (b.action) {
+      const actionDef = PLAY_ACTIONS.find(a => a.id === b.action);
+      const actionLabel = actionDef ? actionDef.label : b.action;
+      html += ' <span class="ai-new-badge" style="background:#555;color:#fff;">' + actionLabel + '</span>';
+    }
     html += '</div>';
     html += '<div class="ai-result-rationale">' + b.rationale + '</div>';
 
@@ -5848,6 +5986,7 @@ function addAIPlayToPlaybook(blockIndex) {
     formation: b.formation || null,
     routePresets: b.routePresets || null,
     motion: b.motion || null,
+    aiAction: b.action || null,
     row: 0
   };
 
@@ -5887,7 +6026,7 @@ async function generatePlayBlock() {
   showAILoading();
 
   try {
-    const { systemPrompt, userMessage } = buildAIPrompt(defense, aiMode, gameId);
+    const { systemPrompt, userMessage } = buildAIPrompt(defense, aiMode, gameId, aiPlayTypeFilter, aiActionTags);
     const raw = await callAI(systemPrompt, userMessage);
 
     // Parse JSON — strip markdown fences and surrounding text if present

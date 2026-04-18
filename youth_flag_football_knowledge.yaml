@@ -484,6 +484,154 @@ youth_flag_football:
       actual_target: "Slant/post on opposite side behind rotating defenders."
       coaching_point: "Sell screen with eyes and initial QB turn, then quickly reset and throw back."
 
+  play_actions:
+    description: >
+      Named play-action categories used by the AI play generator. Each entry
+      lists the UI label, what happens on the play, and the legal flag-football
+      constraints under the Under the Lights 6v6 1st-2nd grade no-rush division.
+      A play may combine at most TWO of these tags for clarity at the 1-2 grade
+      level (e.g., play_action + rollout_boot = classic bootleg).
+    categories:
+      - id: drop_back
+        label: "Drop-Back Pass"
+        rule_bucket: pass
+        summary: "QB takes snap, drops back, throws one forward pass from behind the LOS. No fake."
+        constraints:
+          - "One forward pass, from behind the LOS."
+          - "QB stays behind the LOS for the whole play."
+        coaching_notes:
+          - "Baseline action — pair with clear-out + underneath combos."
+
+      - id: play_action
+        label: "Play-Action Pass"
+        rule_bucket: pass
+        summary: >
+          QB fakes a handoff or pitch to a runner behind the LOS, then throws
+          the one legal forward pass.
+        constraints:
+          - "Fake must happen behind the LOS, no contact with the fake runner."
+          - "One forward pass, from behind the LOS."
+        coaching_notes:
+          - "Most effective after several real runs have been shown."
+          - "Pair with crossers or deep shots that attack space vacated by biters."
+
+      - id: rollout_boot
+        label: "Roll-Out / Boot"
+        rule_bucket: pass
+        summary: >
+          QB takes snap (optionally after a handoff fake = bootleg) and moves
+          laterally toward a sideline behind the LOS, then throws.
+        constraints:
+          - "QB MUST NOT cross the LOS — rollout is purely lateral/backward."
+          - "One forward pass, from behind the LOS."
+          - "Combine with play_action for a classic bootleg."
+        coaching_notes:
+          - "Shortens the field for a young QB; cuts backside reads."
+          - "Pair with a drag underneath and a corner or comeback into the rollout side."
+
+      - id: sweep
+        label: "Sweep"
+        rule_bucket: run
+        summary: >
+          QB hands off or pitches backward to a W/X/Y/Z runner who sweeps wide
+          and turns upfield after crossing the LOS.
+        constraints:
+          - "Handoff or backward/parallel pitch, behind the LOS."
+          - "No blocking — runner wins with speed and angle."
+        coaching_notes:
+          - "Best combined with jet motion to sell direction."
+
+      - id: reverse
+        label: "Reverse"
+        rule_bucket: run
+        summary: >
+          QB hands off or pitches to runner A one way; runner A hands off or
+          pitches to runner B going the opposite way behind the LOS. Runner B
+          carries forward.
+        constraints:
+          - "Both exchanges behind the LOS; each must be a handoff or backward/parallel pitch."
+          - "Uses both laterals of the 2-lateral cap — no additional pitches."
+          - "No forward pass on a pure reverse (use throwback for a pass variant)."
+        coaching_notes:
+          - "Sell first direction with eyes, hips, and a committed jet/motion fake."
+
+      - id: halfback_pass
+        label: "Halfback Pass"
+        rule_bucket: trick
+        summary: >
+          QB hands off or pitches backward to a runner behind the LOS; the
+          runner throws the one legal forward pass.
+        constraints:
+          - "Exchange to runner is behind the LOS."
+          - "Runner throws from behind the LOS."
+          - "Exactly ONE forward pass total — the QB does NOT also throw."
+        variants:
+          - "pitch_and_pass: QB pitches (backward) to a wide runner who throws."
+          - "handoff_and_pass: QB hands off behind the LOS; runner throws."
+        coaching_notes:
+          - "Set up with several real sweeps first."
+          - "Practice the throw from a moving platform — accuracy will suffer."
+
+      - id: double_pass
+        label: "Double Pass"
+        rule_bucket: trick
+        summary: >
+          QB throws a BACKWARD pass (lateral) to a receiver behind the LOS;
+          that receiver then throws the one legal forward pass.
+        constraints:
+          - "First pass from the QB must be clearly backward/parallel — a lateral."
+          - "Catcher must be behind the LOS when they throw the forward pass."
+          - "Second pass is the ONE legal forward pass."
+        coaching_notes:
+          - "Often disguised as a quick screen to the first receiver."
+
+      - id: flea_flicker
+        label: "Flea Flicker"
+        rule_bucket: trick
+        summary: >
+          QB hands off or pitches to a runner behind the LOS; runner pitches
+          back to the QB; QB throws the one legal forward pass.
+        constraints:
+          - "Both exchanges behind the LOS."
+          - "Uses both laterals of the 2-lateral cap."
+        coaching_notes:
+          - "Deep-shot concept — call only when a genuine vertical threat is available."
+
+      - id: throwback
+        label: "Throwback"
+        rule_bucket: trick
+        summary: >
+          Offense flows one way (sweep, bootleg, rollout); the ball carrier or
+          QB throws the one legal forward pass BACK across the field to a
+          delayed backside receiver.
+        constraints:
+          - "One forward pass total, from behind the LOS."
+          - "Backside receiver may delay, but must release and be open."
+        coaching_notes:
+          - "Pair with jet sweep or strong-side flood to pull defenders."
+
+      - id: screen
+        label: "Screen / Bubble"
+        rule_bucket: pass
+        summary: >
+          Short forward pass to a receiver at or just behind the LOS (flat or
+          bubble path); catcher runs with the ball.
+        constraints:
+          - "One forward pass, short, from behind the LOS."
+          - "No blocking or screening downfield — teammates must run legal routes."
+        coaching_notes:
+          - "Good answer when the defense overplays motion or floods one side."
+
+    excluded_actions:
+      - id: double_reverse
+        reason: >
+          Requires three lateral exchanges (QB → A → B → C), which exceeds the
+          2-lateral-per-play cap in this league. Do not generate for grades 1-2.
+      - id: qb_designed_run
+        reason: "QB cannot cross the LOS under no-rush division rules."
+      - id: any_blocking_concept
+        reason: "Flag football disallows blocking, chipping, sealing, or any contact assignment."
+
   ingestion_notes:
     rule_scope_note: >
       Rules and values here reflect common youth and NFL FLAG–style standards but may differ from specific leagues;
