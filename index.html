@@ -5281,6 +5281,15 @@ function resolvePlaySchema(block) {
   // For run actions (sweep/reverse) we park them next to the QB on the
   // opposite side of center so the handoff is a short exchange; for
   // passes we mirror across center (strength flip for deception).
+  //
+  // Note: motion.direction from the AI is sometimes wrong relative to
+  // geometry (e.g. a player already left of center "motioning left" when
+  // the strength-flip invariant forces them to end on the right). We
+  // compute the actual direction from the endX vs start.x delta and
+  // expose it as schema._validatedMotionDir so BOTH the overlay and the
+  // carrier path use the same geometry-derived direction — otherwise
+  // the static diagram and the animation show opposite sweep sides.
+  schema._validatedMotionDir = null;
   if (block.motion && block.motion.player && schema.players[block.motion.player]) {
     const mPlayer = block.motion.player;
     const start = schema.players[mPlayer];
@@ -5297,13 +5306,14 @@ function resolvePlaySchema(block) {
     const motionY = Math.max(start.y, qbY + 20);
 
     schema.postMotion[mPlayer] = { ...start, x: endX, y: motionY };
+    schema._validatedMotionDir = endX >= start.x ? 'right' : 'left';
 
     schema.overlays.push({
       kind: 'motion',
       player: mPlayer,
       color: start.color,
       label: (block.motion.type || 'Jet'),
-      direction: endX >= start.x ? 'right' : 'left',
+      direction: schema._validatedMotionDir,
       // Step-off-the-LOS then slide laterally — matches the animation's
       // motion-phase lane so the static diagram and animation agree.
       path: [
@@ -5321,13 +5331,16 @@ function resolvePlaySchema(block) {
     const color = schema.players[pos].color;
 
     // Run carrier: synthesized lateral-then-upfield sweep, anchored at
-    // post-motion position. Same geometry the animation uses for the
-    // carrier so the diagram arrow matches what gets drawn live.
+    // post-motion position. Uses the geometry-validated motion direction
+    // (not the raw AI input) and the same dx/dy offsets the animation's
+    // animCarrierRunPath emits, so the diagram arrow and the animation
+    // arrow match stroke-for-stroke.
     if (pos === schema.primaryTarget &&
         (schema.action === 'sweep' || schema.action === 'reverse')) {
       const defaultDir = start.x < CENTER_X ? -1 : 1;
-      const motionDir = block.motion && block.motion.direction
-        ? (block.motion.direction === 'right' ? 1 : -1)
+      const validatedDir = schema._validatedMotionDir;
+      const motionDir = validatedDir
+        ? (validatedDir === 'right' ? 1 : -1)
         : defaultDir;
       const dir = schema.action === 'reverse' ? -motionDir : motionDir;
       schema.routes[pos] = {
@@ -6314,10 +6327,12 @@ function animCarrierRunPath(state, pos) {
     ? (state.motion.direction === 'right' ? 1 : -1)
     : defaultDir;
   const dir = state.action === 'reverse' ? -motionDir : motionDir;
+  // Offsets match resolvePlaySchema so the static diagram arrow and the
+  // animated arrow are stroke-for-stroke identical.
   return {
     points: [
-      { dx: 90 * dir, dy: 30 },    // short lateral step behind the LOS
-      { dx: 240 * dir, dy: -320 }  // hard cut upfield, continuing toward the sideline
+      { dx: 90 * dir, dy: 30 },     // short lateral step behind the LOS
+      { dx: 330 * dir, dy: -290 }   // hard cut upfield, continuing toward the sideline
     ],
     type: 'solid',
     label: state.action === 'reverse' ? 'Reverse' : 'Sweep'
