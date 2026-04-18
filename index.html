@@ -773,7 +773,7 @@
     flex:1; overflow:hidden; display:flex; align-items:center; justify-content:center;
     background:#f0f1f3;
   }
-  .anim-canvas-wrap canvas { max-width:100%; max-height:100%; }
+  .anim-canvas-wrap canvas { width:100%; height:100%; object-fit:contain; }
   .anim-controls {
     display:flex; align-items:center; gap:10px; padding:10px 12px;
     background:var(--surface); border-top:1px solid var(--border); flex-shrink:0;
@@ -5418,7 +5418,10 @@ function showPlayAnimation(formation, routePresets, playName, primaryTarget, mot
   // Scale canvas to fit wrapper
   const canvas = document.getElementById('animCanvas');
   const wrap = canvas.parentElement;
-  canvas.width = 800; canvas.height = 580;
+  // 800×640 play area + 50px horizontal / 40px vertical margin so the field
+  // extends past the players and routes. CSS scales the canvas up to fill the
+  // overlay.
+  canvas.width = 900; canvas.height = 720;
 
   // Validate motion. Only W/X/Y/Z may be in motion; C and Q may not.
   // Enforce two invariants the AI's suggestion is NOT trusted to satisfy:
@@ -5911,11 +5914,24 @@ function animRender() {
   if (!animState) return;
   const canvas = document.getElementById('animCanvas');
   const ctx = canvas.getContext('2d');
-  const W = canvas.width, H = canvas.height;
-  const scaleY = H / 640;
+  const cW = canvas.width, cH = canvas.height;
+  // Play area stays in the original 800×640 coordinate space so every existing
+  // draw helper keeps working. We center it inside the larger canvas so the
+  // field extends past the players and routes.
+  const playW = 800, playH = 640;
+  const marginX = (cW - playW) / 2;
+  const marginY = (cH - playH) / 2;
+  const scaleY = 1;
 
-  ctx.clearRect(0, 0, W, H);
-  animDrawField(ctx, W, H);
+  ctx.clearRect(0, 0, cW, cH);
+  // Background fills the entire canvas so the margin reads as more field.
+  ctx.fillStyle = '#f0f1f3';
+  ctx.fillRect(0, 0, cW, cH);
+
+  ctx.save();
+  ctx.translate(marginX, marginY);
+
+  animDrawField(ctx, playW, playH);
 
   const phase = animState.phase;
   const rt = (phase === 'routes') ? animState.routeT : (phase === 'done' ? 1 : 0);
@@ -5930,12 +5946,9 @@ function animRender() {
     animDrawPlayer(ctx, pos, p.x, p.y * scaleY, false, animState.primaryTarget);
   });
 
-  // Real ball.
   const bp = animComputeBall(animState, scaleY);
   if (bp) animDrawBall(ctx, bp.x, bp.y);
 
-  // Play-action fake handoff: dashed arrow QB → recipient, ghost football
-  // miming the ride, and a "FAKE HANDOFF → <pos>" label over the recipient.
   const fh = animComputeFakeHandoff(animState, scaleY);
   if (fh) {
     ctx.save();
@@ -5951,6 +5964,8 @@ function animRender() {
     animDrawBall(ctx, fh.ghost.x, fh.ghost.y, 0.5);
     animDrawCalloutBadge(ctx, fh.label.x, fh.label.y, fh.label.text, fh.label.pulse);
   }
+
+  ctx.restore();
 }
 
 function animLoop(ts) {
