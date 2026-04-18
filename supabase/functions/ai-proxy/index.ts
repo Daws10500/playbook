@@ -90,7 +90,10 @@ Deno.serve(async (req) => {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: model || "claude-sonnet-4-6",
+        // Opus follows multi-field play-design constraints (action ↔ primaryTarget ↔
+        // routes ↔ motion all agreeing) far more faithfully than Sonnet in testing.
+        // The validator still runs client-side as a backstop.
+        model: model || "claude-opus-4-7",
         max_tokens: 2048,
         system: system || undefined,
         messages: messages,

@@ -6137,6 +6137,12 @@ const AI_DEEP_ROUTE_PRESETS = new Set(['Go','Fly','Post','Corner','Fade','Dig','
 // Validate an AI block for internal consistency between action, primary
 // target, motion, routePresets, and per-player route descriptions. Returns
 // { warnings: [...] } where each warning is { code, message, severity }.
+// Severities:
+//   - 'critical' — can't be safely auto-repaired, surfaces a Regenerate
+//     button in the UI. The rendered play will likely look wrong.
+//   - 'warn'     — cosmetic / advisory; the rendered play is OK but the
+//     play's metadata disagrees with something (e.g. motion direction vs
+//     play name).
 // Deterministic, no LLM — runs client-side on every block.
 function validateAIBlock(b) {
   const warnings = [];
@@ -6145,11 +6151,12 @@ function validateAIBlock(b) {
   const pt = b.primaryTarget;
   const isRun = action === 'sweep' || action === 'reverse';
   const name = b.playType || '(unnamed)';
+  const critical = (code, message) => warnings.push({ code, message, severity: 'critical' });
   const warn = (code, message) => warnings.push({ code, message, severity: 'warn' });
 
   // 1. primaryTarget must exist and be a valid position.
   if (!pt || !['W','X','Y','Z','C'].includes(pt)) {
-    warn('primary_missing', 'primaryTarget is missing or not a skill position');
+    critical('primary_missing', 'primaryTarget is missing or not a skill position');
     return { warnings };                 // downstream checks need pt
   }
 
@@ -6161,17 +6168,17 @@ function validateAIBlock(b) {
     // 2a. Primary's route description must describe a carry, not a catch.
     if (primaryDesc && /\b(catches?|caught|receiver|pass|thrown|targets?)\b/.test(primaryDesc) &&
         !/\b(handoff|hands off|pitch(?:es|ed)?|sweep|reverse|carries|carry|ball.?carrier)\b/.test(primaryDesc)) {
-      warn('run_primary_desc_says_pass',
+      critical('run_primary_desc_says_pass',
         `${name}: action is ${action} but primaryTarget ${pt}'s route description sounds like a pass — primary is the ball carrier on sweep/reverse`);
     }
-    // 2b. Primary's routePreset shouldn't be a deep downfield route.
+    // 2b. Primary's routePreset shouldn't be a deep downfield route. (Repaired
+    // automatically to Flat; noting as 'warn' so the coach sees what got fixed.)
     if (primaryPreset && AI_DEEP_ROUTE_PRESETS.has(primaryPreset)) {
       warn('run_primary_deep_route',
         `${name}: action is ${action} but primaryTarget ${pt} has deep route preset "${primaryPreset}" — carrier should have Flat / Screen / none`);
     }
     // 2c. On sweep, a motion player strongly preferred; direction should match.
     if (action === 'sweep' && b.motion && b.motion.player && b.motion.direction) {
-      // If the play name has an explicit side, flag when motion disagrees.
       const nameRight = /\bright\b/i.test(name);
       const nameLeft = /\bleft\b/i.test(name);
       if (nameRight && b.motion.direction === 'left') {
@@ -6186,7 +6193,7 @@ function validateAIBlock(b) {
   if (!isRun) {
     if (primaryDesc && /\b(handoff|hands off|sweep|takes the pitch|reverse|ball.?carrier)\b/.test(primaryDesc) &&
         !/\b(catches?|caught|receives the pass|thrown to|deep ball)\b/.test(primaryDesc)) {
-      warn('pass_primary_desc_says_run',
+      critical('pass_primary_desc_says_run',
         `${name}: action is ${action} but primaryTarget ${pt}'s route sounds like a ball carrier — primary on a pass must catch`);
     }
     // 3a. play_action / halfback_pass / flea_flicker need a fake/handoff recipient.
@@ -6196,11 +6203,11 @@ function validateAIBlock(b) {
         .map(([,desc]) => (desc || '').toLowerCase());
       const hasFake = otherRoutes.some(d => /\b(handoff|takes the handoff|sells? the fake|fake.?(handoff|pitch)|flick|pitches? to)\b/.test(d));
       if (!hasFake) {
-        warn('pass_missing_fake_recipient',
+        critical('pass_missing_fake_recipient',
           `${name}: action is ${action} but no non-primary skill player has a handoff/fake role in their route description`);
       }
     }
-    // 3b. screen — primary's preset should be Screen or Flat.
+    // 3b. screen — primary's preset should be Screen or Flat. (Auto-repaired.)
     if (action === 'screen' && primaryPreset && !['Screen','Flat'].includes(primaryPreset)) {
       warn('screen_primary_not_short',
         `${name}: screen action but primaryTarget ${pt} has preset "${primaryPreset}" — expected Screen or Flat`);
@@ -6208,12 +6215,12 @@ function validateAIBlock(b) {
   }
 
   // 4. No blocking language anywhere — league rule is already in the prompt
-  // but the AI sometimes slips. Flag so the UI can show + user can regen.
+  // but the AI sometimes slips. Critical because we can't rewrite the route.
   if (b.routes) {
     for (const [pos, desc] of Object.entries(b.routes)) {
       if (!desc) continue;
       if (/\b(block|blocker|blocking|chip|seal|wall.?off|pass.?pro|pass.?protect|down.?block|lead.?block|pick(?:s|ed)?\b(?!\s*(up|a\s+pass|the\s+pass)))\b/i.test(desc)) {
-        warn('illegal_blocking',
+        critical('illegal_blocking',
           `${name}: route for ${pos} mentions a blocking/contact action — illegal in flag football`);
       }
     }
@@ -6737,15 +6744,25 @@ function showAIResults(result) {
     html += '</div>';
     html += '<div class="ai-result-rationale">' + b.rationale + '</div>';
 
-    // Validator output: repairs (auto-fixed, green) + warnings (flagged, amber).
+    // Validator output: green=repaired, amber=advisory warning, red=critical
+    // (can't safely auto-fix). Critical cards surface a Regenerate button
+    // so the coach can one-click retry this single play.
     if (b.isNew && (b._repairs && b._repairs.length || b._warnings && b._warnings.length)) {
+      const criticalWarns = (b._warnings || []).filter(w => w.severity === 'critical');
+      const advisoryWarns = (b._warnings || []).filter(w => w.severity !== 'critical');
       html += '<div class="ai-validator" style="margin:6px 0;font-size:12px;line-height:1.4;">';
       (b._repairs || []).forEach(r => {
         html += '<div style="color:#1f9d55;background:rgba(31,157,85,0.08);border-left:3px solid #1f9d55;padding:4px 8px;margin:3px 0;">✓ Fixed: ' + r.message + '</div>';
       });
-      (b._warnings || []).forEach(w => {
+      criticalWarns.forEach(w => {
+        html += '<div style="color:#b11a1a;background:rgba(220,38,38,0.08);border-left:3px solid #dc2626;padding:4px 8px;margin:3px 0;">✗ ' + w.message + '</div>';
+      });
+      advisoryWarns.forEach(w => {
         html += '<div style="color:#b5651d;background:rgba(255,165,0,0.08);border-left:3px solid #d4a017;padding:4px 8px;margin:3px 0;">⚠ ' + w.message + '</div>';
       });
+      if (criticalWarns.length) {
+        html += '<button data-regen-index="' + idx + '" onclick="regenerateSinglePlay(' + idx + ')" style="margin-top:6px;padding:6px 12px;background:#dc2626;color:#fff;border:0;border-radius:4px;font-weight:600;cursor:pointer;font-size:12px;">↻ Regenerate this play</button>';
+      }
       html += '</div>';
     }
 
@@ -6804,6 +6821,95 @@ function showAIResults(result) {
   html += '</div>';
 
   area.innerHTML = html;
+}
+
+// Regenerate a single AI play in place. Called from the red "Regenerate"
+// button that appears on cards with critical validator warnings. Sends a
+// focused prompt that preserves the original formation/action/target and
+// asks the model to fix the specific consistency issues the validator
+// flagged, then replaces the block in aiCurrentResult and re-renders.
+async function regenerateSinglePlay(blockIndex) {
+  if (!aiCurrentResult || !aiCurrentResult.block || !aiCurrentResult.block[blockIndex]) return;
+  const original = aiCurrentResult.block[blockIndex];
+  if (!original.isNew) return;
+
+  const btn = document.querySelector('[data-regen-index="' + blockIndex + '"]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Regenerating…'; btn.style.opacity = '0.7'; }
+
+  try {
+    const defense = aiCurrentResult.defense || 'generic defense';
+    const critical = (original._warnings || [])
+      .filter(w => w.severity === 'critical')
+      .map(w => '- ' + w.message)
+      .join('\n') || '- (no specific validator output)';
+
+    // Reuse buildAIPrompt so we inherit every rule the main generator has,
+    // then append a regenerate directive that pins the shape of the output.
+    const { systemPrompt: basePrompt } = buildAIPrompt(
+      defense, 'suggest', '__none__', 'any', new Set());
+
+    const systemPrompt = basePrompt + '\n\n' +
+      '========================================\n' +
+      'REGENERATE A SINGLE PLAY\n' +
+      '========================================\n' +
+      'You previously generated this play and it failed validator checks.\n' +
+      'Regenerate it, fixing the issues below, while keeping:\n' +
+      '  playType    = "' + (original.playType || '') + '"\n' +
+      '  action      = "' + (original.action || '') + '"\n' +
+      '  formation   = "' + (original.formation || '') + '"\n' +
+      '  primaryTarget = "' + (original.primaryTarget || '') + '"\n\n' +
+      'Issues to fix:\n' + critical + '\n\n' +
+      'OUTPUT: a SINGLE JSON object for just this one play (no markdown, no\n' +
+      'wrapping overallStrategy/block). Fields: order=' + (original.order || 1) + ', ' +
+      'playNum=null, playType, rationale, isNew=true, description, formation,\n' +
+      'primaryTarget, action, routePresets (all 6 positions), routes (all 6 positions\n' +
+      'with semantically correct descriptions — carriers describe a CARRY, not a catch),\n' +
+      'motion (if the concept uses it). Nothing else, no surrounding prose.';
+
+    const raw = await callAI(systemPrompt, 'Regenerate the play now.');
+
+    let cleaned = raw.trim();
+    if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+    if (cleaned[0] !== '{' && cleaned[0] !== '[') {
+      const js = cleaned.search(/[\[{]/);
+      if (js !== -1) {
+        const le = cleaned.lastIndexOf('}'), lB = cleaned.lastIndexOf(']');
+        const je = Math.max(le, lB);
+        if (je > js) cleaned = cleaned.slice(js, je + 1);
+      }
+    }
+    let parsed = JSON.parse(cleaned);
+    if (parsed.block && Array.isArray(parsed.block) && parsed.block[0]) parsed = parsed.block[0];
+
+    parsed.isNew = true;
+    parsed.order = original.order;
+    if (parsed.formation !== original.formation) parsed.formation = original.formation;
+    if (parsed.primaryTarget !== original.primaryTarget) parsed.primaryTarget = original.primaryTarget;
+
+    coerceAIBlockAction(parsed, null);
+    parsed._repairs = repairAIBlock(parsed);
+    parsed._warnings = validateAIBlock(parsed).warnings;
+
+    if (parsed.formation && parsed.routePresets) {
+      const diag = renderNewPlayDiagram(parsed);
+      if (diag) {
+        parsed._diagramBase64 = diag.imageBase64;
+        parsed._diagramData = diag.diagramData;
+      }
+    }
+
+    aiCurrentResult.block[blockIndex] = parsed;
+    if (typeof saveAIResult === 'function') saveAIResult(aiCurrentResult);
+    showAIResults(aiCurrentResult);
+  } catch (e) {
+    console.error('regenerateSinglePlay error:', e);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '↻ Regenerate failed — retry';
+      btn.style.opacity = '1';
+    }
+    alert('Regenerate failed: ' + (e.message || 'Unknown error'));
+  }
 }
 
 function animateAIPlay(blockIndex) {
