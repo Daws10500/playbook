@@ -6093,21 +6093,45 @@ function inferActionFromName(name) {
   if (/sweep|jet|handoff|\brun\b|draw/.test(n)) return 'sweep';
   return '';
 }
+// Any handoff-verb phrasing: noun "handoff" / "hand-off" / "hand off",
+// verbs "hands off / handing off / hands the ball off / hand the ball off".
+const HANDOFF_PHRASE = '(?:hand[- ]?offs?|hands?\\s+(?:the\\s+ball\\s+)?off|handing\\s+(?:the\\s+ball\\s+)?off)';
+const HANDOFF_RE = new RegExp('\\b' + HANDOFF_PHRASE + '\\b');
+// "QB fakes the handoff" / "fake handoff" / "fake-handoff" / "fake hand-off" —
+// the ball never actually changes hands, this is a play-action mime. Strip
+// these before looking for a REAL handoff so a misdirection fake doesn't
+// fool the classifier. Accepts fake / fakes / faked / faking.
+const FAKE_HANDOFF_RE = new RegExp(
+  '\\b(?:faked?|fakes|faking)(?:[- ]|\\s+(?:the\\s+|a\\s+)?)' + HANDOFF_PHRASE + '\\b',
+  'g'
+);
+// True when the text describes a real handoff (not a mimed fake handoff).
+function textHasRealHandoff(n) {
+  return HANDOFF_RE.test(n.replace(FAKE_HANDOFF_RE, ' '));
+}
 // Classify a chunk of text as 'run' / 'pass' / '' — unambiguous only. Text
 // that hits both categories (e.g. "Jet Sweep Pass") returns '' so callers
 // fall back to the explicit action.
 function aiCategoryFromText(text) {
   const n = (text || '').toLowerCase();
+  // A LITERAL handoff reference pins the play to the run bucket even when
+  // misdirection words ("fake", "pass fake") show up alongside. A play
+  // named "Circle - Pass Fake - Handoff to Z" or "Fake Sweep Handoff to X"
+  // really does hand the ball off — the fake is the decoy, the handoff is
+  // the action. textHasRealHandoff already strips out the one case where
+  // "handoff" is itself being faked ("QB fakes the handoff to X"), so
+  // those fall through to the pass logic below.
+  if (textHasRealHandoff(n)) return 'run';
   // Unambiguous ACTION keywords win first. These name the play's action
   // itself (not just the motion type). "Jet Flat Throwback" → pass,
   // because "throwback" is an action word while "jet" just describes
   // the motion. Same for "screen", "flicker", "rollout", "boot",
-  // "handoff", "sweep", "reverse", "draw", "counter", "end-around".
-  // "fake" is included as a strong-pass token because in practice every
-  // "fake [something]" construction in play names/descriptions implies a
-  // play-action pass concept (15× in the last 23-play corpus).
-  if (/\bthrow.?back\b|\bflicker\b|\bflea.?flick|\bscreen\b|\brollout\b|\bboot(?:leg)?\b|halfback.?pass|double.?pass|drop.?back|play.?action|\bpa\b|\bfake\b/.test(n)) return 'pass';
-  if (/\bhandoff\b|hands off|\bsweep\b|\breverse\b|end.?around|\bcounter\b|\bdraw\b/.test(n)) return 'run';
+  // "sweep", "reverse", "draw", "counter", "end-around".
+  // "fake" is included as a strong-pass token because, with real handoffs
+  // already handled above, every remaining "fake [something]" construction
+  // implies a play-action pass concept.
+  if (/\bthrow.?back\b|\bflicker\b|\bflea.?flick|\bscreen\b|\brollout\b|\bboot(?:leg)?\b|halfback.?pass|double.?pass|drop.?back|play.?action|\bpa\b|\bfaked?\b|\bfakes\b|\bfaking\b/.test(n)) return 'pass';
+  if (/\bsweep\b|\breverse\b|end.?around|\bcounter\b|\bdraw\b/.test(n)) return 'run';
   // Fall-through to weaker tokens — "jet" here is only motion, and
   // "pass" / "catches" alone are soft pass signals. The run verb accepts
   // run / runs / running so inflected forms ("RB running the ball") match.
