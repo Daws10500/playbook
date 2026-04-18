@@ -6098,8 +6098,17 @@ function inferActionFromName(name) {
 // fall back to the explicit action.
 function aiCategoryFromText(text) {
   const n = (text || '').toLowerCase();
-  const hasPass = /\bpass\b|drop.?back|play.?action|\bpa\b|rollout|\bboot\b|screen|flicker|throw.?back|halfback.?pass|double.?pass|thrown|\bthrows\b|\bcatches\b|drops back to throw/.test(n);
-  const hasRun  = /\bsweep\b|\bjet\b|handoff|hands off|\bpitch(?:es|ed)?\b|\brun\b|runs the ball|carries|carry|\bdraw\b|reverse|end.?around|counter|ball.?carrier/.test(n);
+  // Unambiguous ACTION keywords win first. These name the play's action
+  // itself (not just the motion type). "Jet Flat Throwback" → pass,
+  // because "throwback" is an action word while "jet" just describes
+  // the motion. Same for "screen", "flicker", "rollout", "boot",
+  // "handoff", "sweep", "reverse", "draw", "counter", "end-around".
+  if (/\bthrow.?back\b|\bflicker\b|\bflea.?flick|\bscreen\b|\brollout\b|\bboot(?:leg)?\b|halfback.?pass|double.?pass|drop.?back|play.?action|\bpa\b/.test(n)) return 'pass';
+  if (/\bhandoff\b|hands off|\bsweep\b|\breverse\b|end.?around|\bcounter\b|\bdraw\b/.test(n)) return 'run';
+  // Fall-through to weaker tokens — "jet" here is only motion, and
+  // "pass" / "catches" alone are soft pass signals.
+  const hasPass = /\bpass\b|thrown|\bthrows\b|\bcatches\b|drops back to throw/.test(n);
+  const hasRun  = /\bjet\b|\bpitch(?:es|ed)?\b|\brun\b|runs the ball|carries|carry|ball.?carrier/.test(n);
   if (hasRun && !hasPass) return 'run';
   if (hasPass && !hasRun) return 'pass';
   return '';
@@ -6163,7 +6172,7 @@ function coerceAIBlockAction(b, filter) {
 // Route presets that represent a deep downfield route — the ball carrier on
 // a run play should never be on one of these (they're supposed to be running
 // the ball behind the LOS, not catching a deep pass).
-const AI_DEEP_ROUTE_PRESETS = new Set(['Go','Fly','Post','Corner','Fade','Dig','Comeback']);
+const AI_DEEP_ROUTE_PRESETS = new Set(['Go','Fly','Post','Corner','Fade','Dig','Comeback','Wheel']);
 
 // Validate an AI block for internal consistency between action, primary
 // target, motion, routePresets, and per-player route descriptions. Returns
@@ -6197,8 +6206,17 @@ function validateAIBlock(b) {
   // 2. Run-action sanity — primary must be the ball carrier.
   if (isRun) {
     // 2a. Primary's route description must describe a carry, not a catch.
-    if (primaryDesc && /\b(catches?|caught|receiver|pass|thrown|targets?)\b/.test(primaryDesc) &&
-        !/\b(handoff|hands off|pitch(?:es|ed)?|sweep|reverse|carries|carry|ball.?carrier)\b/.test(primaryDesc)) {
+    // Broadened pass-language detection to cover "release and run a wheel/
+    // post/go/..." style descriptions, which are clearly pass-route
+    // phrasings even without the word "catch".
+    const PASS_ROUTE_WORDS = '(fly|go|post|corner|fade|dig|comeback|wheel|slant|out|in|curl|drag|flat|seam|route|vertical)';
+    const runPassLanguage =
+      /\b(catches?|caught|receiver|pass|thrown|targets?)\b/.test(primaryDesc) ||
+      new RegExp('\\brelease\\b.*\\brun\\b.*' + PASS_ROUTE_WORDS, 'i').test(primaryDesc) ||
+      new RegExp('\\brun\\b\\s+a\\s+' + PASS_ROUTE_WORDS, 'i').test(primaryDesc);
+    const runCarryLanguage =
+      /\b(handoff|hands off|pitch(?:es|ed)?|\bsweep\b|\breverse\b|carries|carry|ball.?carrier)\b/i.test(primaryDesc);
+    if (primaryDesc && runPassLanguage && !runCarryLanguage) {
       critical('run_primary_desc_says_pass',
         `${name}: action is ${action} but primaryTarget ${pt}'s route description sounds like a pass — primary is the ball carrier on sweep/reverse`);
     }
