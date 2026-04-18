@@ -4098,6 +4098,7 @@ function updateDefenseDiagram() {
 }
 
 const ANTHROPIC_MODELS = [
+  {id:'claude-opus-4-7',   name:'Claude Opus 4.7'},
   {id:'claude-sonnet-4-6', name:'Claude Sonnet 4.6'},
   {id:'claude-haiku-4-5-20251001', name:'Claude Haiku 4.5'}
 ];
@@ -4254,7 +4255,7 @@ function loadAISettings() {
   } catch(e) {}
   return {
     provider: 'anthropic',
-    anthropic: { model: 'claude-sonnet-4-6' },
+    anthropic: { model: 'claude-opus-4-7' },
     ollamaCloud: { endpoint: 'http://localhost:11434', model: 'gemini-3-flash-preview:cloud', thinking: true, temperature: 0.7, numCtx: 8192 },
     ollamaLocal: { endpoint: 'http://localhost:11434', model: '', temperature: 0.7, numCtx: 8192 },
     proxyUrl: SUPABASE_URL + '/functions/v1/ai-proxy'
@@ -5009,7 +5010,7 @@ async function callAI(systemPrompt, userMessage) {
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
       body: JSON.stringify({
         provider: 'anthropic',
-        model: settings.anthropic.model || 'claude-sonnet-4-6',
+        model: settings.anthropic.model || 'claude-opus-4-7',
         messages: [
           { role: 'user', content: userMessage }
         ],
