@@ -5399,9 +5399,11 @@ function resolvePlaySchema(block) {
 
     // Reverse intermediate runner: override their pass-route preset with
     // a short "lateral to meet" path so the static diagram shows both
-    // runners actually converging for the second exchange.
-    if (schema.action === 'reverse' && block.motion && pos === block.motion.player &&
-        pos !== schema.primaryTarget) {
+    // runners actually converging for the second exchange. The runner may
+    // be the motion player (jet sweep into reverse) or a non-motion player
+    // when motion is a decoy — pickReverseIntermediateRunner sorts this out.
+    if (schema.action === 'reverse' && pos !== schema.primaryTarget &&
+        pos === pickReverseIntermediateRunner(block)) {
       const P0 = schema.postMotion[schema.primaryTarget];
       const Qp = schema.postMotion.Q;
       const meet = reverseMeetPoint(start, P0, Qp && Qp.y);
@@ -5435,10 +5437,11 @@ function resolvePlaySchema(block) {
   // Action-specific overlays.
   const Q = schema.postMotion.Q;
   const primary = schema.primaryTarget && schema.postMotion[schema.primaryTarget];
-  if (schema.action === 'reverse' && Q && primary && block.motion && block.motion.player) {
+  const reverseRunnerKey = schema.action === 'reverse' ? pickReverseIntermediateRunner(block) : null;
+  if (schema.action === 'reverse' && Q && primary && reverseRunnerKey) {
     // Reverse draws TWO handoffs: QB → intermediate, then intermediate → primary
     // (who is at the meet point after their come-back leg).
-    const R = schema.postMotion[block.motion.player];
+    const R = schema.postMotion[reverseRunnerKey];
     const meet = reverseMeetPoint(R, primary, Q.y);
     if (R && meet) {
       schema.overlays.push({
@@ -5778,7 +5781,7 @@ function drawStar(ctx, cx, cy, outerR, innerR, points) {
 // ============= PLAY ANIMATION ENGINE =============
 let animState = null; // { formation, routePresets, playName, phase, animT, lastT, af, positions, routeT, primaryTarget }
 
-function showPlayAnimation(formation, routePresets, playName, primaryTarget, motion, action) {
+function showPlayAnimation(formation, routePresets, playName, primaryTarget, motion, action, routes) {
   const overlay = document.getElementById('animOverlay');
   overlay.classList.add('active');
   document.body.style.overflow = 'hidden';
@@ -5867,6 +5870,9 @@ function showPlayAnimation(formation, routePresets, playName, primaryTarget, mot
     formation, routePresets, playName, formData, primaryTarget,
     motion: validMotion,
     action: normalizedAction,
+    routes: routes || null,     // route descriptions — used by animPickRunner
+                                // to identify the real intermediate runner on
+                                // reverse when motion is a decoy.
     phase: 'idle', animT: 0, lastT: 0, af: null,
     positions: {},
     routeT: 0, snapT: 0, motionT: 0
@@ -6526,12 +6532,31 @@ function animCarrierRunPath(state, pos) {
   };
 }
 
+// Reverse intermediate runner path: a single-segment "lateral to meet"
+// line from the player's formation spot to the meet point. Used for the
+// drawn route so the arrow agrees with the overridden position.
+function animIntermediateRunPath(state, pos) {
+  if (!state || state.action !== 'reverse') return null;
+  if (pos !== state._runner || pos === state.primaryTarget) return null;
+  const start = state.formData && state.formData[pos];
+  const primary = state.formData && state.formData[state.primaryTarget];
+  const Q = state.formData && state.formData.Q;
+  const meet = reverseMeetPoint(start, primary, Q && Q.y);
+  if (!start || !meet) return null;
+  return {
+    points: [{ dx: meet.x - start.x, dy: meet.y - start.y }],
+    type: 'solid',
+    label: 'Handoff'
+  };
+}
 // Unified route lookup. Returns { points, type, label } for whichever path
 // the player should be drawing this snap — a synthesized run path for the
 // ball carrier on sweep/reverse, otherwise the AI-picked preset.
 function animGetRouteDef(state, pos) {
   const carrier = animCarrierRunPath(state, pos);
   if (carrier) return carrier;
+  const intermediate = animIntermediateRunPath(state, pos);
+  if (intermediate) return intermediate;
   const preset = state.routePresets && state.routePresets[pos];
   if (!preset || preset === 'Snap') return null;
   const def = ROUTE_PRESETS[preset];
@@ -6539,8 +6564,46 @@ function animGetRouteDef(state, pos) {
   return { points: def.points, type: def.type, label: preset };
 }
 
+// Regex matching a route description that puts the player in the role of
+// "receives the first exchange from the QB" — the intermediate runner on a
+// reverse or the ball-carrier on a sweep. Motion player picks assume this
+// role, but the AI sometimes motions a decoy and tasks a different player
+// with the actual carry (e.g. motion = deep Post, X takes the backward
+// pitch from QB, X hands off to Y).
+const FROM_QB_RECEIVE_RE = /\b(take|takes|taking|receive|receives|receiving|catch|catches|get|gets)\b[^.]*\b(handoff|pitch|ball|toss|lateral)\b[^.]*\bfrom\b[^.]*\b(q|qb|quarterback)\b|\b(backward\s+)?pitch\b[^.]*\bfrom\b[^.]*\b(q|qb|quarterback)\b|\bfrom\s+q(b|uarterback)?\b[^.]*\b(sprint|run|sweep)\b/i;
+// Picks the intermediate runner on a reverse by consulting the block's
+// route descriptions. Prefers a non-primary player whose route explicitly
+// says they take the first exchange from the QB (route descriptions are
+// the ground truth when motion is a decoy). Falls back to the motion
+// player, then null. Shared by the static diagram and the animation so
+// they pick the same player.
+function pickReverseIntermediateRunner(block) {
+  if (!block) return null;
+  const primary = block.primaryTarget;
+  const routes = block.routes;
+  if (routes) {
+    for (const p of ['W','X','Y','Z']) {
+      if (p === primary || !routes[p]) continue;
+      if (FROM_QB_RECEIVE_RE.test(routes[p])) return p;
+    }
+  }
+  if (block.motion && block.motion.player && block.motion.player !== primary) {
+    return block.motion.player;
+  }
+  return null;
+}
 function animPickRunner(state) {
   const primary = state.primaryTarget;
+  const routes = state.routes || (state.block && state.block.routes) || null;
+  // Reverse: prefer whichever non-primary player's description explicitly
+  // says they take the first pitch/handoff from the QB. Falls back to
+  // motion → position heuristic only when no route description names it.
+  if (state.action === 'reverse' && routes) {
+    for (const p of ['W','X','Y','Z']) {
+      if (p === primary || !routes[p]) continue;
+      if (FROM_QB_RECEIVE_RE.test(routes[p])) return p;
+    }
+  }
   if (state.motion && state.motion.player && state.motion.player !== primary) {
     return state.motion.player;
   }
@@ -7199,7 +7262,7 @@ function animateAIPlay(blockIndex) {
   // showAIResults (e.g. direct programmatic invocation).
   if (b && b.isNew) coerceAIBlockAction(b, null);
   if (b.formation && b.routePresets) {
-    showPlayAnimation(b.formation, b.routePresets, b.playType, b.primaryTarget, b.motion, b.action);
+    showPlayAnimation(b.formation, b.routePresets, b.playType, b.primaryTarget, b.motion, b.action, b.routes);
   }
 }
 
@@ -7230,7 +7293,7 @@ function animatePlayFromPlaybook(playNum) {
   };
   coerceAIBlockAction(block, null);
   action = block.action;
-  showPlayAnimation(play.formation, play.routePresets, play.type, play.target, play.motion, action);
+  showPlayAnimation(play.formation, play.routePresets, play.type, play.target, play.motion, action, routes);
 }
 
 // Actions whose ball path is a run (ball carrier crosses the LOS on the
