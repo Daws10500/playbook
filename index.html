@@ -6309,14 +6309,15 @@ function showAIError(msg) {
 }
 
 function showAIResults(result) {
-  const area = document.getElementById('aiResultsArea');
-  if (!area) return;
-  aiCurrentResult = result;
   // Heal blocks stored before action-coercion shipped: re-check each block's
   // run/pass intent against its name + route description, so an old entry
   // with action: "drop_back" on an obviously run-intended play animates as
-  // a run from here on.
-  (result.block || []).forEach(b => { if (b && b.isNew) coerceAIBlockAction(b, null); });
+  // a run from here on. Runs before the DOM-presence guard so the fix applies
+  // even when the AI tab isn't mounted yet (e.g. loaded from history).
+  (result && result.block || []).forEach(b => { if (b && b.isNew) coerceAIBlockAction(b, null); });
+  aiCurrentResult = result;
+  const area = document.getElementById('aiResultsArea');
+  if (!area) return;
 
   let html = '';
 
@@ -6413,6 +6414,9 @@ function showAIResults(result) {
 function animateAIPlay(blockIndex) {
   if (!aiCurrentResult || !aiCurrentResult.block || !aiCurrentResult.block[blockIndex]) return;
   const b = aiCurrentResult.block[blockIndex];
+  // Defensive: heal action if caller reached us without going through
+  // showAIResults (e.g. direct programmatic invocation).
+  if (b && b.isNew) coerceAIBlockAction(b, null);
   if (b.formation && b.routePresets) {
     showPlayAnimation(b.formation, b.routePresets, b.playType, b.primaryTarget, b.motion, b.action);
   }
