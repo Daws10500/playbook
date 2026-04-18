@@ -5228,7 +5228,184 @@ function toggleAIActionTag(id) {
   renderAI();
 }
 
-function renderNewPlayDiagram(formation, routePresets, playName, primaryTarget) {
+// Resolve a block into the geometric schema BOTH renderers (static diagram
+// and animation overlays) consume. Single source of truth for:
+//   - where each player starts (formation) and sits at the snap (post-motion)
+//   - per-player route path (synthesized sweep for run carriers; preset
+//     arrows for everyone else)
+//   - action overlays: motion arc, handoff arrow, fake-handoff, pocket drop
+// Y axis convention matches the canvas: higher y = deeper in the backfield
+// (LOS receivers sit around y=440, QB around y=560).
+function resolvePlaySchema(block) {
+  const schema = {
+    formation: null, action: null, primaryTarget: null,
+    players: {}, postMotion: {}, routes: {}, overlays: []
+  };
+  if (!block) return schema;
+  const formData = FORMATIONS[block.formation];
+  if (!formData) return schema;
+
+  schema.formation = block.formation;
+  schema.action = normalizeAIAction(block.action, block.playType);
+  schema.primaryTarget = block.primaryTarget;
+
+  const POSITIONS = ['C', 'Q', 'W', 'X', 'Y', 'Z'];
+  const CENTER_X = 400;
+  POSITIONS.forEach(pos => {
+    if (!formData[pos]) return;
+    const pc = posColors[pos];
+    const base = { x: formData[pos].x, y: formData[pos].y, color: pc ? pc.color : '#888' };
+    schema.players[pos] = base;
+    schema.postMotion[pos] = { ...base };
+  });
+
+  // Motion: where does the motion player END at the snap?
+  // For run actions (sweep/reverse) we park them next to the QB on the
+  // opposite side of center so the handoff is a short exchange; for
+  // passes we mirror across center (strength flip for deception).
+  if (block.motion && block.motion.player && schema.players[block.motion.player]) {
+    const mPlayer = block.motion.player;
+    const start = schema.players[mPlayer];
+    const isRun = schema.action === 'sweep' || schema.action === 'reverse';
+    let endX;
+    if (isRun && schema.players.Q) {
+      const side = start.x < CENTER_X ? 1 : -1;
+      endX = schema.players.Q.x + 35 * side;
+    } else {
+      endX = 2 * CENTER_X - start.x;
+    }
+    endX = Math.max(40, Math.min(760, endX));
+    const qbY = schema.players.Q ? schema.players.Q.y : 560;
+    const motionY = Math.max(start.y, qbY + 20);
+
+    schema.postMotion[mPlayer] = { ...start, x: endX, y: motionY };
+
+    schema.overlays.push({
+      kind: 'motion',
+      player: mPlayer,
+      color: start.color,
+      label: (block.motion.type || 'Jet'),
+      direction: endX >= start.x ? 'right' : 'left',
+      // Step-off-the-LOS then slide laterally — matches the animation's
+      // motion-phase lane so the static diagram and animation agree.
+      path: [
+        { x: start.x, y: start.y },
+        { x: start.x, y: motionY },
+        { x: endX, y: motionY }
+      ]
+    });
+  }
+
+  // Per-player route paths.
+  POSITIONS.forEach(pos => {
+    const start = schema.postMotion[pos];
+    if (!start) return;
+    const color = schema.players[pos].color;
+
+    // Run carrier: synthesized lateral-then-upfield sweep, anchored at
+    // post-motion position. Same geometry the animation uses for the
+    // carrier so the diagram arrow matches what gets drawn live.
+    if (pos === schema.primaryTarget &&
+        (schema.action === 'sweep' || schema.action === 'reverse')) {
+      const defaultDir = start.x < CENTER_X ? -1 : 1;
+      const motionDir = block.motion && block.motion.direction
+        ? (block.motion.direction === 'right' ? 1 : -1)
+        : defaultDir;
+      const dir = schema.action === 'reverse' ? -motionDir : motionDir;
+      schema.routes[pos] = {
+        points: [
+          { x: start.x, y: start.y },
+          { x: start.x + 90 * dir, y: start.y + 30 },
+          { x: start.x + 330 * dir, y: start.y - 290 }
+        ],
+        label: schema.action === 'reverse' ? 'Reverse' : 'Sweep',
+        style: 'solid',
+        color
+      };
+      return;
+    }
+
+    const preset = block.routePresets && block.routePresets[pos];
+    if (!preset || preset === 'Snap') return;
+    const routeDef = ROUTE_PRESETS[preset];
+    if (!routeDef) return;
+    schema.routes[pos] = {
+      points: [
+        { x: start.x, y: start.y },
+        ...routeDef.points.map(p => ({ x: start.x + p.dx, y: start.y + p.dy }))
+      ],
+      label: preset,
+      style: routeDef.type || 'solid',
+      color
+    };
+  });
+
+  // Action-specific overlays.
+  const Q = schema.postMotion.Q;
+  const primary = schema.primaryTarget && schema.postMotion[schema.primaryTarget];
+  if ((schema.action === 'sweep' || schema.action === 'reverse') && Q && primary) {
+    schema.overlays.push({
+      kind: 'handoff',
+      from: { x: Q.x, y: Q.y },
+      to: { x: primary.x, y: primary.y },
+      label: schema.action === 'reverse' ? 'Reverse' : 'Handoff'
+    });
+  } else if (schema.action === 'play_action' && Q) {
+    // Pick a fake recipient: motion player if non-primary, else the
+    // W/X/Y/Z closest to the QB.
+    let fake = null;
+    if (block.motion && block.motion.player && block.motion.player !== schema.primaryTarget) {
+      fake = block.motion.player;
+    } else {
+      const others = ['W','X','Y','Z'].filter(p =>
+        p !== schema.primaryTarget && schema.postMotion[p]);
+      others.sort((a,b) => {
+        const pa = schema.postMotion[a], pb = schema.postMotion[b];
+        return Math.hypot(pa.x - Q.x, pa.y - Q.y) - Math.hypot(pb.x - Q.x, pb.y - Q.y);
+      });
+      fake = others[0] || null;
+    }
+    if (fake && schema.postMotion[fake]) {
+      const r = schema.postMotion[fake];
+      schema.overlays.push({
+        kind: 'fake_handoff',
+        from: { x: Q.x, y: Q.y },
+        to: { x: r.x, y: r.y },
+        label: 'FAKE → ' + fake
+      });
+    }
+  } else if (schema.action === 'drop_back' && Q) {
+    schema.overlays.push({
+      kind: 'pocket',
+      from: { x: Q.x, y: Q.y },
+      to: { x: Q.x, y: Q.y + 40 }
+    });
+  } else if (schema.action === 'rollout_boot' && Q) {
+    // Lean the QB toward the primary's side.
+    const side = primary && primary.x > Q.x ? 1 : -1;
+    schema.overlays.push({
+      kind: 'rollout',
+      from: { x: Q.x, y: Q.y },
+      to: { x: Q.x + 80 * side, y: Q.y + 20 }
+    });
+  }
+
+  if (schema.primaryTarget) {
+    schema.overlays.push({ kind: 'primary_star', pos: schema.primaryTarget });
+  }
+
+  return schema;
+}
+
+function renderNewPlayDiagram(block) {
+  // Back-compat: callers used to pass (formation, routePresets, playName, primaryTarget).
+  // If called that way, repack into a block shape.
+  if (typeof block === 'string') {
+    const [formation, routePresets, playName, primaryTarget] = arguments;
+    block = { formation, routePresets, playType: playName, primaryTarget };
+  }
+  const { formation, playType: playName, primaryTarget } = block;
+  const routePresets = block.routePresets;
   const W = 800, H = 640;
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
@@ -5296,84 +5473,136 @@ function renderNewPlayDiagram(formation, routePresets, playName, primaryTarget) 
   ctx.beginPath(); ctx.moveTo(20, losY); ctx.lineTo(W - 20, losY); ctx.stroke();
   ctx.setLineDash([]);
 
-  const positions = ['C', 'Q', 'W', 'X', 'Y', 'Z'];
   const playerRadius = 24;
   const cSide = 42;
   const diagramPlayers = {};
   const diagramRoutes = {};
 
-  // 5. Draw routes (under players)
-  positions.forEach(pos => {
-    const preset = routePresets[pos];
-    if (!preset || preset === 'Snap') return;
-    const routeDef = ROUTE_PRESETS[preset];
-    if (!routeDef) return;
-    const start = formationData[pos];
-    if (!start) return;
-    const pc = posColors[pos];
-    const color = pc ? pc.color : '#888';
-    const r = pos === 'C' ? cSide / 2 : playerRadius;
+  // Shared schema: single source of truth for positions, route paths, and
+  // overlays. Both renderers (static + animation) read from this.
+  const schema = resolvePlaySchema(block);
 
-    // Exit point from circle edge
-    const fp = routeDef.points[0];
-    const fd = Math.sqrt(fp.dx * fp.dx + fp.dy * fp.dy);
-    const exitX = fd > 0 ? start.x + (fp.dx / fd) * r : start.x;
-    const exitY = fd > 0 ? start.y + (fp.dy / fd) * r : start.y;
+  // Helper: stroke an arrowhead at the end of a polyline segment.
+  function strokeArrowhead(from, to, color, size) {
+    const ang = Math.atan2(to.y - from.y, to.x - from.x);
+    const s = size || 14, a = Math.PI / 6;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(to.x, to.y);
+    ctx.lineTo(to.x - s * Math.cos(ang - a), to.y - s * Math.sin(ang - a));
+    ctx.lineTo(to.x - s * Math.cos(ang + a), to.y - s * Math.sin(ang + a));
+    ctx.closePath();
+    ctx.fill();
+  }
 
-    const pts = [{ x: exitX, y: exitY }];
-    routeDef.points.forEach(p => { pts.push({ x: start.x + p.dx, y: start.y + p.dy }); });
-
-    // Draw polyline
+  // Helper: draw a polyline with a solid or dashed stroke.
+  function drawPolyline(points, color, style, width) {
     ctx.strokeStyle = color;
-    ctx.lineWidth = 5;
+    ctx.lineWidth = width || 5;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.setLineDash(routeDef.type === 'dashed' ? [10, 8] : []);
+    ctx.setLineDash(style === 'dashed' ? [10, 8] : []);
     ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
     ctx.stroke();
     ctx.setLineDash([]);
+  }
 
-    // Arrowhead or block bar
-    const last = pts[pts.length - 1];
-    const prev = pts[pts.length - 2];
-    const angle = Math.atan2(last.y - prev.y, last.x - prev.x);
+  // 5a. Motion arc (under everything else). Dashed to signal pre-snap.
+  const motion = schema.overlays.find(o => o.kind === 'motion');
+  if (motion) {
+    drawPolyline(motion.path, motion.color, 'dashed', 3);
+    const lastSeg = motion.path[motion.path.length - 1];
+    const prevSeg = motion.path[motion.path.length - 2];
+    strokeArrowhead(prevSeg, lastSeg, motion.color, 12);
+    // Label mid-arc.
+    const mid = motion.path[1];
+    ctx.fillStyle = motion.color;
+    ctx.font = '600 12px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const arrow = motion.direction === 'left' ? '\u2190' : '\u2192';
+    ctx.fillText(motion.label + ' ' + arrow, mid.x + 8, mid.y + 14);
+  }
 
-    if (routeDef.type === 'block') {
-      const barLen = 14;
-      const perp = angle + Math.PI / 2;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(last.x + Math.cos(perp) * barLen, last.y + Math.sin(perp) * barLen);
-      ctx.lineTo(last.x - Math.cos(perp) * barLen, last.y - Math.sin(perp) * barLen);
-      ctx.stroke();
-    } else {
-      const aLen = 16, aAng = Math.PI / 6;
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.moveTo(last.x, last.y);
-      ctx.lineTo(last.x - aLen * Math.cos(angle - aAng), last.y - aLen * Math.sin(angle - aAng));
-      ctx.lineTo(last.x - aLen * Math.cos(angle + aAng), last.y - aLen * Math.sin(angle + aAng));
-      ctx.closePath();
-      ctx.fill();
-    }
+  // 5b. Per-player route arrows (below player dots).
+  Object.entries(schema.routes).forEach(([pos, route]) => {
+    const pts = route.points;
+    if (!pts || pts.length < 2) return;
+    // Trim first point to the player's circle edge so the arrow starts
+    // at the edge, not the centre.
+    const first = pts[0], next = pts[1];
+    const r = pos === 'C' ? cSide / 2 : playerRadius;
+    const fd = Math.hypot(next.x - first.x, next.y - first.y);
+    const drawFirst = fd > 0
+      ? { x: first.x + ((next.x - first.x) / fd) * r, y: first.y + ((next.y - first.y) / fd) * r }
+      : first;
+    const drawPts = [drawFirst, ...pts.slice(1)];
+    drawPolyline(drawPts, route.color, route.style, 5);
+    const last = drawPts[drawPts.length - 1];
+    const prev = drawPts[drawPts.length - 2];
+    strokeArrowhead(prev, last, route.color, 16);
+    // Route label next to the endpoint.
+    ctx.fillStyle = '#333';
+    ctx.font = '600 11px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(route.label, last.x + 6, last.y - 6);
 
+    // Record for saved-play metadata (kept for backwards compat).
     diagramRoutes[pos] = {
-      points: routeDef.points.map(p => ({ dx: p.dx, dy: p.dy })),
-      type: routeDef.type,
-      label: preset
+      points: pts.slice(1).map(p => ({
+        dx: p.x - schema.postMotion[pos].x,
+        dy: p.y - schema.postMotion[pos].y
+      })),
+      type: route.style, label: route.label
     };
   });
 
-  // 6. Draw players
-  positions.forEach(pos => {
-    const p = formationData[pos];
-    if (!p) return;
-    const pc = posColors[pos];
-    const color = pc ? pc.color : '#888';
+  // 5c. Handoff / fake-handoff / pocket / rollout overlays (below players).
+  schema.overlays.forEach(ov => {
+    if (ov.kind === 'handoff') {
+      drawPolyline([ov.from, ov.to], '#1f9d55', 'solid', 3);
+      strokeArrowhead(ov.from, ov.to, '#1f9d55', 11);
+      ctx.fillStyle = '#1f9d55';
+      ctx.font = '600 11px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const mx = (ov.from.x + ov.to.x) / 2, my = (ov.from.y + ov.to.y) / 2;
+      ctx.fillText(ov.label, mx, my - 10);
+    } else if (ov.kind === 'fake_handoff') {
+      drawPolyline([ov.from, ov.to], '#d4a017', 'dashed', 3);
+      strokeArrowhead(ov.from, ov.to, '#d4a017', 11);
+      ctx.fillStyle = '#b5651d';
+      ctx.font = '600 11px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const mx = (ov.from.x + ov.to.x) / 2, my = (ov.from.y + ov.to.y) / 2;
+      ctx.fillText(ov.label, mx, my - 10);
+    } else if (ov.kind === 'pocket') {
+      drawPolyline([ov.from, ov.to], '#666', 'dashed', 2);
+      strokeArrowhead(ov.from, ov.to, '#666', 9);
+      ctx.fillStyle = '#666';
+      ctx.font = '600 10px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('drop', ov.to.x + 8, ov.to.y);
+    } else if (ov.kind === 'rollout') {
+      drawPolyline([ov.from, ov.to], '#666', 'solid', 3);
+      strokeArrowhead(ov.from, ov.to, '#666', 10);
+      ctx.fillStyle = '#666';
+      ctx.font = '600 10px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = ov.to.x > ov.from.x ? 'left' : 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('boot', ov.to.x + (ov.to.x > ov.from.x ? 6 : -6), ov.to.y + 4);
+    }
+  });
 
+  // 6. Draw players at their formation start positions. (Motion arc above
+  // already shows where they end up pre-snap.)
+  Object.entries(schema.players).forEach(([pos, p]) => {
+    const color = p.color;
     if (pos === primaryTarget) {
       drawStar(ctx, p.x, p.y, playerRadius + 4, (playerRadius + 4) * 0.45, 5);
       ctx.fillStyle = color; ctx.fill();
@@ -6476,7 +6705,7 @@ function showAIResults(result) {
   result.block.forEach((b, idx) => {
     // Render diagram for new plays that have formation + routePresets
     if (b.isNew && b.formation && b.routePresets && !b._diagramBase64) {
-      const diagResult = renderNewPlayDiagram(b.formation, b.routePresets, b.playType, b.primaryTarget);
+      const diagResult = renderNewPlayDiagram(b);
       if (diagResult) {
         b._diagramBase64 = diagResult.imageBase64;
         b._diagramData = diagResult.diagramData;
@@ -6619,7 +6848,7 @@ const AI_RUN_ACTION_IDS = new Set(['sweep', 'reverse']);
 // preserves every field the canvas animator needs.
 function buildPlayFromAIBlock(b, nextNum) {
   if (!b._diagramBase64 && b.formation && b.routePresets) {
-    const diagResult = renderNewPlayDiagram(b.formation, b.routePresets, b.playType, b.primaryTarget);
+    const diagResult = renderNewPlayDiagram(b);
     if (diagResult) {
       b._diagramBase64 = diagResult.imageBase64;
       b._diagramData = diagResult.diagramData;

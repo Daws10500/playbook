@@ -1,4 +1,4 @@
-const CACHE_NAME = 'playbook-v33';
+const CACHE_NAME = 'playbook-v34';
 const ASSETS = [
   './',
   './index.html',
