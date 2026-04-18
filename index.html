@@ -4608,98 +4608,6 @@ PRE-SNAP MOTION (use when it helps the concept):
 - Never describe motion using words like "up to the LOS," "toward the line," "across the line pre-snap," "press the LOS," "creep forward," "in front of the center," or anything that implies forward or same-side motion.
 - Include a short human-readable description so the coach can see what the motion is.
 
-========================================
-ANIMATION GRAMMAR — what each \`action\` LOOKS like on our animator
-========================================
-This app renders your JSON into a moving canvas. The animator reads
-\`action\`, \`primaryTarget\`, \`motion\`, \`routePresets\`, and the per-player
-\`routes\` descriptions TOGETHER. For the animation to match intent,
-these fields must tell ONE coherent story.
-
-RUN ACTIONS (ball carrier crosses the LOS on foot; NO forward pass)
-
-- sweep
-  Visual: QB takes snap → short pitch/handoff to carrier behind LOS
-  (the canvas shows a quick ~1-step exchange) → carrier runs laterally
-  then turns upfield toward the motion-direction sideline.
-  Required:
-    • primaryTarget IS the ball carrier (prefer the MOTION player).
-    • routes[primaryTarget] describes a CARRY: "takes the pitch and
-      sweeps right", "receives the handoff, turns upfield". NEVER a
-      downfield pass route (Fly/Post/Corner/Fade/Dig).
-    • motion is strongly preferred; motion direction = sweep side.
-
-- reverse
-  Visual: QB → runner A (first handoff/pitch going one way) → runner A
-  → runner B (second handoff going the OPPOSITE way) → runner B carries.
-  Required:
-    • primaryTarget = runner B (final carrier).
-    • routes[runnerA]: "takes the handoff, pitches to [B] going left".
-    • routes[primaryTarget]: "takes the reverse from [A] and runs left".
-    • reverse direction is OPPOSITE the motion direction.
-
-PASS ACTIONS (end with EXACTLY one forward pass from behind the LOS)
-
-- drop_back
-  Visual: QB drops straight back, throws to primary.
-  Required: primaryTarget is a receiver on a downfield route. No
-  "handoff/pitch/sweep" language anywhere on the primary.
-
-- play_action
-  Visual: QB mimes a handoff to a runner (canvas draws a FAKE HANDOFF
-  arrow + label) for the first ~0.3 of the play, THEN drops and throws.
-  Required:
-    • A non-primary skill player gets a SHORT near-LOS route to sell
-      the fake — prefer the MOTION player or the W/X/Y/Z closest to QB.
-      Their routes entry must say "sells the fake handoff then runs
-      flat/drag". Do NOT put the fake recipient on a deep vertical.
-    • primaryTarget is a different player on a downfield pass route.
-
-- rollout_boot
-  Visual: QB boots laterally out of the pocket, then throws while moving.
-  Required: routes[Q] says "Snap, boots right, throws on the run".
-  primaryTarget is on the rollout side (Out/Corner/Flat/Comeback).
-
-- screen
-  Visual: short pass to a receiver at/behind the LOS; they turn upfield.
-  Required: routePresets[primaryTarget] = "Screen" or "Flat"; other
-  receivers clear out deep to pull coverage.
-
-- halfback_pass
-  Visual: QB hands off behind LOS → runner throws the forward pass.
-  Required:
-    • The runner receiving the handoff is NOT primaryTarget.
-    • routes[runner]: "takes the handoff and throws to [primary]".
-    • routes[primaryTarget]: "runs a [Post/Fly/Corner] and catches the
-      deep pass from [runner]".
-
-- flea_flicker
-  Visual: QB hands off forward → runner flicks back to QB behind LOS →
-  QB throws deep.
-  Required: two exchanges in the routes descriptions, then a deep pass
-  route for primaryTarget.
-
-- throwback
-  Visual: play flows one side (sweep/rollout); thrower pivots and throws
-  BACK to a backside receiver crossing behind the LOS.
-  Required: primaryTarget = the BACKSIDE receiver (not the one flowing).
-
-INTERNAL CONSISTENCY CHECK (run before emitting each play):
-  1. Does routes[primaryTarget] describe what \`action\` requires —
-     CARRY (sweep/reverse) vs CATCH (everything else)?
-  2. For sweep/reverse: is primaryTarget a ball carrier (backfield /
-     motion player), not a slot/outside receiver on a deep route?
-  3. For play_action / halfback_pass / flea_flicker: is there a
-     non-primary player whose routes entry explicitly mentions
-     "takes the handoff" or "sells the fake"?
-  4. For run actions with motion, does motion.direction match the
-     sweep side (or, for reverse, the INITIAL handoff direction)?
-  5. Does the play NAME agree with the action? "Sweep" → sweep,
-     "Play Action X" → play_action, "Four Verticals" → drop_back.
-
-If any answer is "no", REWRITE the play before emitting.
-========================================
-
 You MUST include "formation" and "routePresets" for every new play. Include "motion" whenever the concept uses pre-snap motion.` : 'MODE: Only select plays from the existing playbook. Do NOT invent new plays.'}
 
 OUTPUT FORMAT — respond with ONLY valid JSON, no markdown fences:
@@ -5980,6 +5888,130 @@ function coerceAIBlockAction(b, filter) {
     b.action = aiDefaultPassAction(b);
   }
 }
+
+// Route presets that represent a deep downfield route — the ball carrier on
+// a run play should never be on one of these (they're supposed to be running
+// the ball behind the LOS, not catching a deep pass).
+const AI_DEEP_ROUTE_PRESETS = new Set(['Go','Fly','Post','Corner','Fade','Dig','Comeback']);
+
+// Validate an AI block for internal consistency between action, primary
+// target, motion, routePresets, and per-player route descriptions. Returns
+// { warnings: [...] } where each warning is { code, message, severity }.
+// Deterministic, no LLM — runs client-side on every block.
+function validateAIBlock(b) {
+  const warnings = [];
+  if (!b || !b.isNew) return { warnings };
+  const action = (b.action || '').toLowerCase();
+  const pt = b.primaryTarget;
+  const isRun = action === 'sweep' || action === 'reverse';
+  const name = b.playType || '(unnamed)';
+  const warn = (code, message) => warnings.push({ code, message, severity: 'warn' });
+
+  // 1. primaryTarget must exist and be a valid position.
+  if (!pt || !['W','X','Y','Z','C'].includes(pt)) {
+    warn('primary_missing', 'primaryTarget is missing or not a skill position');
+    return { warnings };                 // downstream checks need pt
+  }
+
+  const primaryDesc = (b.routes && b.routes[pt] || '').toLowerCase();
+  const primaryPreset = b.routePresets && b.routePresets[pt];
+
+  // 2. Run-action sanity — primary must be the ball carrier.
+  if (isRun) {
+    // 2a. Primary's route description must describe a carry, not a catch.
+    if (primaryDesc && /\b(catches?|caught|receiver|pass|thrown|targets?)\b/.test(primaryDesc) &&
+        !/\b(handoff|hands off|pitch(?:es|ed)?|sweep|reverse|carries|carry|ball.?carrier)\b/.test(primaryDesc)) {
+      warn('run_primary_desc_says_pass',
+        `${name}: action is ${action} but primaryTarget ${pt}'s route description sounds like a pass — primary is the ball carrier on sweep/reverse`);
+    }
+    // 2b. Primary's routePreset shouldn't be a deep downfield route.
+    if (primaryPreset && AI_DEEP_ROUTE_PRESETS.has(primaryPreset)) {
+      warn('run_primary_deep_route',
+        `${name}: action is ${action} but primaryTarget ${pt} has deep route preset "${primaryPreset}" — carrier should have Flat / Screen / none`);
+    }
+    // 2c. On sweep, a motion player strongly preferred; direction should match.
+    if (action === 'sweep' && b.motion && b.motion.player && b.motion.direction) {
+      // If the play name has an explicit side, flag when motion disagrees.
+      const nameRight = /\bright\b/i.test(name);
+      const nameLeft = /\bleft\b/i.test(name);
+      if (nameRight && b.motion.direction === 'left') {
+        warn('motion_dir_mismatch', `${name}: motion goes left but name says right`);
+      } else if (nameLeft && b.motion.direction === 'right') {
+        warn('motion_dir_mismatch', `${name}: motion goes right but name says left`);
+      }
+    }
+  }
+
+  // 3. Pass-action sanity — primary must be a receiver catching.
+  if (!isRun) {
+    if (primaryDesc && /\b(handoff|hands off|sweep|takes the pitch|reverse|ball.?carrier)\b/.test(primaryDesc) &&
+        !/\b(catches?|caught|receives the pass|thrown to|deep ball)\b/.test(primaryDesc)) {
+      warn('pass_primary_desc_says_run',
+        `${name}: action is ${action} but primaryTarget ${pt}'s route sounds like a ball carrier — primary on a pass must catch`);
+    }
+    // 3a. play_action / halfback_pass / flea_flicker need a fake/handoff recipient.
+    if (['play_action','halfback_pass','flea_flicker'].includes(action)) {
+      const otherRoutes = Object.entries(b.routes || {})
+        .filter(([pos]) => pos !== pt && pos !== 'Q' && pos !== 'C')
+        .map(([,desc]) => (desc || '').toLowerCase());
+      const hasFake = otherRoutes.some(d => /\b(handoff|takes the handoff|sells? the fake|fake.?(handoff|pitch)|flick|pitches? to)\b/.test(d));
+      if (!hasFake) {
+        warn('pass_missing_fake_recipient',
+          `${name}: action is ${action} but no non-primary skill player has a handoff/fake role in their route description`);
+      }
+    }
+    // 3b. screen — primary's preset should be Screen or Flat.
+    if (action === 'screen' && primaryPreset && !['Screen','Flat'].includes(primaryPreset)) {
+      warn('screen_primary_not_short',
+        `${name}: screen action but primaryTarget ${pt} has preset "${primaryPreset}" — expected Screen or Flat`);
+    }
+  }
+
+  // 4. No blocking language anywhere — league rule is already in the prompt
+  // but the AI sometimes slips. Flag so the UI can show + user can regen.
+  if (b.routes) {
+    for (const [pos, desc] of Object.entries(b.routes)) {
+      if (!desc) continue;
+      if (/\b(block|blocker|blocking|chip|seal|wall.?off|pass.?pro|pass.?protect|down.?block|lead.?block|pick(?:s|ed)?\b(?!\s*(up|a\s+pass|the\s+pass)))\b/i.test(desc)) {
+        warn('illegal_blocking',
+          `${name}: route for ${pos} mentions a blocking/contact action — illegal in flag football`);
+      }
+    }
+  }
+
+  return { warnings };
+}
+
+// Safe in-place repairs. Mutates b to resolve obvious inconsistencies that
+// would otherwise render wrong. Returns the list of repairs performed.
+function repairAIBlock(b) {
+  if (!b || !b.isNew) return [];
+  const repairs = [];
+  // coerceAIBlockAction already handles action normalization; call first so
+  // repairs here operate on the post-coerce action.
+  coerceAIBlockAction(b, null);
+  const action = (b.action || '').toLowerCase();
+  const pt = b.primaryTarget;
+  if (!pt || !b.routePresets) return repairs;
+  const preset = b.routePresets[pt];
+
+  // Run-primary on a deep route: downgrade to "Flat". The animator already
+  // overrides the carrier's drawn route with a synthesized sweep path, so
+  // this only affects the static diagram + saved-play preset.
+  if ((action === 'sweep' || action === 'reverse') && preset && AI_DEEP_ROUTE_PRESETS.has(preset)) {
+    b.routePresets[pt] = 'Flat';
+    repairs.push({ code: 'run_primary_deep_route_fixed',
+      message: `Downgraded ${pt}'s route from ${preset} → Flat (run carrier shouldn't be on a deep route)` });
+  }
+
+  // Screen-primary not on a short preset: coerce to Screen.
+  if (action === 'screen' && preset && !['Screen','Flat'].includes(preset)) {
+    b.routePresets[pt] = 'Screen';
+    repairs.push({ code: 'screen_primary_fixed',
+      message: `Set ${pt}'s route to Screen (primary on screen action)` });
+  }
+  return repairs;
+}
 function normalizeAIAction(raw, playName) {
   const s = (raw == null ? '' : String(raw)).toLowerCase().trim().replace(/[-\s]+/g, '_');
   const current = AI_ACTION_CANONICAL.has(s) ? s : (AI_ACTION_SYNONYMS[s] || '');
@@ -6417,11 +6449,15 @@ function showAIError(msg) {
 
 function showAIResults(result) {
   // Heal blocks stored before action-coercion shipped: re-check each block's
-  // run/pass intent against its name + route description, so an old entry
-  // with action: "drop_back" on an obviously run-intended play animates as
-  // a run from here on. Runs before the DOM-presence guard so the fix applies
-  // even when the AI tab isn't mounted yet (e.g. loaded from history).
-  (result && result.block || []).forEach(b => { if (b && b.isNew) coerceAIBlockAction(b, null); });
+  // run/pass intent, apply safe repairs, and record warnings for the UI.
+  // Runs before the DOM-presence guard so the fix applies even when the AI
+  // tab isn't mounted yet (e.g. loaded from history).
+  (result && result.block || []).forEach(b => {
+    if (!b || !b.isNew) return;
+    coerceAIBlockAction(b, null);
+    b._repairs = repairAIBlock(b);
+    b._warnings = validateAIBlock(b).warnings;
+  });
   aiCurrentResult = result;
   const area = document.getElementById('aiResultsArea');
   if (!area) return;
@@ -6460,6 +6496,18 @@ function showAIResults(result) {
     }
     html += '</div>';
     html += '<div class="ai-result-rationale">' + b.rationale + '</div>';
+
+    // Validator output: repairs (auto-fixed, green) + warnings (flagged, amber).
+    if (b.isNew && (b._repairs && b._repairs.length || b._warnings && b._warnings.length)) {
+      html += '<div class="ai-validator" style="margin:6px 0;font-size:12px;line-height:1.4;">';
+      (b._repairs || []).forEach(r => {
+        html += '<div style="color:#1f9d55;background:rgba(31,157,85,0.08);border-left:3px solid #1f9d55;padding:4px 8px;margin:3px 0;">✓ Fixed: ' + r.message + '</div>';
+      });
+      (b._warnings || []).forEach(w => {
+        html += '<div style="color:#b5651d;background:rgba(255,165,0,0.08);border-left:3px solid #d4a017;padding:4px 8px;margin:3px 0;">⚠ ' + w.message + '</div>';
+      });
+      html += '</div>';
+    }
 
     // Diagram for new plays
     if (b.isNew && b._diagramBase64) {
@@ -6685,7 +6733,13 @@ async function generatePlayBlock() {
         // Coerce AI-generated action to match the play's name/filter intent so
         // the stored block, saved-play PASS/RUN badge, and animation agree.
         // Models sometimes return drop_back/play_action for a run-named play.
-        if (b.isNew) coerceAIBlockAction(b, aiPlayTypeFilter);
+        // Then validate + repair: deterministic checks catch obvious
+        // action/primary/route inconsistencies the AI still slips through.
+        if (b.isNew) {
+          coerceAIBlockAction(b, aiPlayTypeFilter);
+          b._repairs = repairAIBlock(b);
+          b._warnings = validateAIBlock(b).warnings;
+        }
       });
     }
 
