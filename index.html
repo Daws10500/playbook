@@ -4587,8 +4587,9 @@ For the Center, pick a short route like Slant, Drag, Curl, or Flat — the Cente
 PRE-SNAP MOTION (use when it helps the concept):
 - Exactly one player may be in motion at the snap. Pick ONE of W, X, Y, or Z (never C or Q).
 - Motion is STRICTLY LATERAL (parallel to the LOS) or moves BACKWARD away from the LOS. The motion player must remain BEHIND the LOS for the entire motion — they do NOT cross or touch the line of scrimmage pre-snap. The motion player only crosses the LOS after the snap, and only as part of their post-snap route or handoff.
-- Supported motion types: "Jet" (wide sweep across behind QB), "Orbit" (arc behind QB ending same side), "Short" (small 1-2 step shift in or out).
-- Never describe motion using words like "up to the LOS," "toward the line," "across the line pre-snap," "press the LOS," "creep forward," or anything that implies forward motion.
+- The motion path MUST run BEHIND the Center and the QB (deeper than the QB), never in front of or on top of the Center. The motion player ALWAYS ENDS on the opposite side of the formation from where they started — motion switches the formation strength.
+- Supported motion types: "Jet" (wide sweep across behind QB), "Orbit" (arc behind QB), "Short" (compact cross behind QB). All three cross to the opposite side; they differ only in tempo/feel.
+- Never describe motion using words like "up to the LOS," "toward the line," "across the line pre-snap," "press the LOS," "creep forward," "in front of the center," or anything that implies forward or same-side motion.
 - Include a short human-readable description so the coach can see what the motion is.
 
 You MUST include "formation" and "routePresets" for every new play. Include "motion" whenever the concept uses pre-snap motion.` : 'MODE: Only select plays from the existing playbook. Do NOT invent new plays.'}
@@ -5420,40 +5421,39 @@ function showPlayAnimation(formation, routePresets, playName, primaryTarget, mot
   canvas.width = 800; canvas.height = 580;
 
   // Validate motion. Only W/X/Y/Z may be in motion; C and Q may not.
-  // Motion is strictly parallel to the LOS AND must stay behind it — the
-  // motion player takes a short step off the LOS at the start of the motion
-  // phase and slides laterally at that backfield y, then breaks into their
-  // route at the snap. This matches real flag-football motion and guarantees
-  // the pre-snap motion never crosses the line of scrimmage.
+  // Enforce two invariants the AI's suggestion is NOT trusted to satisfy:
+  //   (1) The motion path runs BEHIND the C and Q — deeper than the QB —
+  //       so the motion player never crosses over the Center or the LOS.
+  //   (2) The motion player ENDS on the opposite side of center (x=400),
+  //       i.e. motion always switches the strength of the formation. This
+  //       matches how youth flag motion is actually used.
   let validMotion = null;
   if (motion && motion.player && ['W','X','Y','Z'].indexOf(motion.player) !== -1 && formData[motion.player]) {
-    const type = (motion.type || 'Short');
-    const dir = motion.direction === 'left' ? -1 : 1;
-    // Parallel-to-LOS horizontal shift. Distances tuned to canvas units (800 wide).
-    const magByType = { Jet: 320, Orbit: 220, Short: 120 };
-    const mag = magByType[type] != null ? magByType[type] : 180;
+    const type = (motion.type || 'Jet');
     const start = formData[motion.player];
-    let endX = start.x + dir * mag;
-    endX = Math.max(40, Math.min(760, endX)); // clamp inside field
 
-    // In this coordinate system, LOS = min(W/X/Y/Z.y) and higher y values
-    // are further into the backfield. Force the motion path to sit clearly
-    // BEHIND the LOS so the player cannot visually cross it during motion.
-    const losY = Math.min(
-      ...['W','X','Y','Z'].map(p => formData[p] ? formData[p].y : Infinity)
-    );
-    const MOTION_BACK_OFFSET = 28;
-    const motionY = Math.max(start.y, losY + MOTION_BACK_OFFSET);
+    // (2) End on the opposite side of the center line by mirroring across x=400.
+    const CENTER_X = 400;
+    let endX = 2 * CENTER_X - start.x;
+    endX = Math.max(40, Math.min(760, endX));
+
+    // (1) Motion lane sits behind the QB (deepest offensive player).
+    const qbY = formData.Q ? formData.Q.y : 560;
+    const MOTION_BEHIND_QB = 20;
+    const motionY = Math.max(start.y, qbY + MOTION_BEHIND_QB);
+
+    // Direction label follows the actual crossover so the UI arrow is honest.
+    const displayDir = endX >= start.x ? 'right' : 'left';
 
     validMotion = {
       player: motion.player,
       type,
-      direction: motion.direction === 'left' ? 'left' : 'right',
+      direction: displayDir,
       description: motion.description || '',
       startX: start.x,
       startY: start.y,    // original formation y (on/near LOS)
       endX,
-      y: motionY          // clamped backfield y used during motion
+      y: motionY          // backfield y used during motion — behind C and Q
     };
   }
 
