@@ -5807,17 +5807,71 @@ function inferActionFromName(name) {
   if (/sweep|jet|handoff|\brun\b|draw/.test(n)) return 'sweep';
   return '';
 }
-// Classify a play name as 'run' / 'pass' / '' — unambiguous only. A name like
-// "Jet Sweep Pass" has both run and pass tokens, so we return '' and trust
-// the explicit action. Used to detect when the AI's action field contradicts
-// a clearly run- or pass-named play.
-function aiCategoryFromName(playName) {
-  const n = (playName || '').toLowerCase();
-  const hasPass = /\bpass\b|drop.?back|play.?action|\bpa\b|rollout|boot|screen|flicker|throw.?back|halfback.?pass|double.?pass/.test(n);
-  const hasRun  = /sweep|jet|handoff|\brun\b|draw|reverse|end.?around|counter/.test(n);
+// Classify a chunk of text as 'run' / 'pass' / '' — unambiguous only. Text
+// that hits both categories (e.g. "Jet Sweep Pass") returns '' so callers
+// fall back to the explicit action.
+function aiCategoryFromText(text) {
+  const n = (text || '').toLowerCase();
+  const hasPass = /\bpass\b|drop.?back|play.?action|\bpa\b|rollout|\bboot\b|screen|flicker|throw.?back|halfback.?pass|double.?pass|thrown|\bthrows\b|\bcatches\b|drops back to throw/.test(n);
+  const hasRun  = /\bsweep\b|\bjet\b|handoff|hands off|\bpitch(?:es|ed)?\b|\brun\b|runs the ball|carries|carry|\bdraw\b|reverse|end.?around|counter|ball.?carrier/.test(n);
   if (hasRun && !hasPass) return 'run';
   if (hasPass && !hasRun) return 'pass';
   return '';
+}
+// Classify a full AI block (name + primary target route description + preset)
+// to get the strongest run/pass signal we can.
+function aiCategoryFromBlock(b) {
+  if (!b) return '';
+  const nameCat = aiCategoryFromText(b.playType);
+  if (nameCat) return nameCat;
+  const pt = b.primaryTarget;
+  if (pt && b.routes && b.routes[pt]) {
+    const descCat = aiCategoryFromText(b.routes[pt]);
+    if (descCat) return descCat;
+  }
+  if (pt && b.routePresets && b.routePresets[pt]) {
+    const presetCat = aiCategoryFromText(b.routePresets[pt]);
+    if (presetCat) return presetCat;
+  }
+  return '';
+}
+// Kept for backward-compatibility with normalizeAIAction's name-only check.
+function aiCategoryFromName(playName) {
+  return aiCategoryFromText(playName);
+}
+// Best-guess run action id when the block is clearly a run but the AI action
+// field disagrees. Prefers reverse when the name/description mentions it.
+function aiDefaultRunAction(b) {
+  const text = ((b && b.playType) || '') + ' ' + ((b && b.primaryTarget && b.routes && b.routes[b.primaryTarget]) || '');
+  return /reverse|end.?around/i.test(text) ? 'reverse' : 'sweep';
+}
+function aiDefaultPassAction(b) {
+  const text = ((b && b.playType) || '') + ' ' + ((b && b.primaryTarget && b.routes && b.routes[b.primaryTarget]) || '');
+  if (/play.?action|\bpa\b|fake/i.test(text)) return 'play_action';
+  if (/rollout|boot/i.test(text)) return 'rollout_boot';
+  if (/screen/i.test(text)) return 'screen';
+  if (/flicker/i.test(text)) return 'flea_flicker';
+  if (/throw.?back/i.test(text)) return 'throwback';
+  if (/halfback.?pass/i.test(text)) return 'halfback_pass';
+  if (/double.?pass/i.test(text)) return 'double_pass';
+  return 'drop_back';
+}
+// Coerce an AI block's action field against all available context (name,
+// primary target's route description, preset, and the coach's filter).
+// Heals pre-fix history where the stored action disagrees with the block's
+// actual run/pass intent.
+function coerceAIBlockAction(b, filter) {
+  if (!b) return;
+  const normalized = normalizeAIAction(b.action, b.playType);
+  if (normalized) b.action = normalized;
+  const RUN_IDS = new Set(['sweep', 'reverse']);
+  const cat = aiCategoryFromBlock(b);
+  const isRun = RUN_IDS.has((b.action || '').toLowerCase());
+  if ((filter === 'run' || cat === 'run') && !isRun) {
+    b.action = aiDefaultRunAction(b);
+  } else if ((filter === 'pass' || cat === 'pass') && isRun) {
+    b.action = aiDefaultPassAction(b);
+  }
 }
 function normalizeAIAction(raw, playName) {
   const s = (raw == null ? '' : String(raw)).toLowerCase().trim().replace(/[-\s]+/g, '_');
@@ -6258,6 +6312,11 @@ function showAIResults(result) {
   const area = document.getElementById('aiResultsArea');
   if (!area) return;
   aiCurrentResult = result;
+  // Heal blocks stored before action-coercion shipped: re-check each block's
+  // run/pass intent against its name + route description, so an old entry
+  // with action: "drop_back" on an obviously run-intended play animates as
+  // a run from here on.
+  (result.block || []).forEach(b => { if (b && b.isNew) coerceAIBlockAction(b, null); });
 
   let html = '';
 
@@ -6373,6 +6432,19 @@ function animatePlayFromPlaybook(playNum) {
     if (legacy === 'RUN') action = 'sweep';
     else if (legacy === 'PASS') action = 'drop_back';
   }
+  // Heal plays saved before action-coercion shipped: rebuild a block shape
+  // and re-derive action from name + route description, so an AI play stored
+  // with aiAction: "drop_back" that's actually a sweep animates as a run.
+  let routes = null;
+  if (play.routeDescriptions) {
+    try { routes = JSON.parse(play.routeDescriptions); } catch(e) {}
+  }
+  const block = {
+    playType: play.type, action, primaryTarget: play.target,
+    routePresets: play.routePresets, routes
+  };
+  coerceAIBlockAction(block, null);
+  action = block.action;
   showPlayAnimation(play.formation, play.routePresets, play.type, play.target, play.motion, action);
 }
 
@@ -6502,20 +6574,7 @@ async function generatePlayBlock() {
         // Coerce AI-generated action to match the play's name/filter intent so
         // the stored block, saved-play PASS/RUN badge, and animation agree.
         // Models sometimes return drop_back/play_action for a run-named play.
-        if (b.isNew) {
-          const normalized = normalizeAIAction(b.action, b.playType);
-          if (normalized) b.action = normalized;
-          if (aiPlayTypeFilter === 'run' && !AI_RUN_ACTION_IDS.has((b.action || '').toLowerCase())) {
-            b.action = /reverse|end.?around/i.test(b.playType || '') ? 'reverse' : 'sweep';
-          } else if (aiPlayTypeFilter === 'pass' && AI_RUN_ACTION_IDS.has((b.action || '').toLowerCase())) {
-            b.action = /play.?action|\bpa\b|fake/i.test(b.playType || '') ? 'play_action'
-                     : /rollout|boot/i.test(b.playType || '') ? 'rollout_boot'
-                     : /screen/i.test(b.playType || '') ? 'screen'
-                     : /flicker/i.test(b.playType || '') ? 'flea_flicker'
-                     : /throw.?back/i.test(b.playType || '') ? 'throwback'
-                     : 'drop_back';
-          }
-        }
+        if (b.isNew) coerceAIBlockAction(b, aiPlayTypeFilter);
       });
     }
 
