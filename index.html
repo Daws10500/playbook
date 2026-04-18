@@ -5469,6 +5469,10 @@ function showPlayAnimation(formation, routePresets, playName, primaryTarget, mot
   ['C','Q','W','X','Y','Z'].forEach(pos => {
     if (formData[pos]) animState.positions[pos] = { x: formData[pos].x, y: formData[pos].y };
   });
+  // Pick the runner / intermediate / fake recipient for this play, if the
+  // action calls for one. Prefer the motion player; fall back to a nearby
+  // non-primary receiver running a short backfield-ish route.
+  animState._runner = animPickRunner(animState);
 
   animRender();
 }
@@ -5677,16 +5681,9 @@ function animDrawPlayer(ctx, pos, x, y, highlight, primaryTarget) {
   ctx.fillText(pos, x, y);
 }
 
-// Actions whose ball path is a handoff to the primary (primary carries the ball).
-const RUN_ACTIONS = new Set(['sweep', 'reverse']);
-// Actions that include a meaningful fake the coach should see called out.
-const FAKE_ACTIONS = new Set([
-  'play_action', 'halfback_pass', 'flea_flicker',
-  'double_pass', 'throwback', 'reverse'
-]);
-
-function animDrawBall(ctx, x, y) {
+function animDrawBall(ctx, x, y, alpha) {
   ctx.save();
+  if (alpha != null) ctx.globalAlpha = alpha;
   // Football body
   ctx.fillStyle = '#7a4a1f';
   ctx.strokeStyle = '#3d2108';
@@ -5706,9 +5703,14 @@ function animDrawBall(ctx, x, y) {
   ctx.restore();
 }
 
-function animDrawFakeBadge(ctx, x, y, pulse) {
+// Red rounded-rect label used to call out the fake. Caller provides the text
+// so we can reuse the same badge for "FAKE HANDOFF", etc.
+function animDrawCalloutBadge(ctx, x, y, text, pulse) {
   ctx.save();
-  const w = 48 * pulse, h = 20 * pulse, r = 5;
+  ctx.font = 'bold ' + Math.round(12 * pulse) + 'px sans-serif';
+  const padX = 10 * pulse;
+  const tw = ctx.measureText(text).width;
+  const w = tw + padX * 2, h = 20 * pulse, r = 5;
   ctx.fillStyle = 'rgba(220,50,50,0.95)';
   ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.8;
   ctx.beginPath();
@@ -5724,90 +5726,184 @@ function animDrawFakeBadge(ctx, x, y, pulse) {
   ctx.closePath();
   ctx.fill(); ctx.stroke();
   ctx.fillStyle = '#fff';
-  ctx.font = 'bold ' + Math.round(12 * pulse) + 'px sans-serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('FAKE', x, y + 0.5);
+  ctx.fillText(text, x, y + 0.5);
   ctx.restore();
 }
 
-// Returns { x, y } of the ball in 580-display space, plus optional fake label
-// anchor. Stays at the Center pre-snap, arcs to the QB on the snap, then either
-// (a) hands off to the primary on run plays, or (b) is thrown to the primary
-// on pass plays. Release/handoff timing depends on whether the action carries
-// a fake.
+// Pick the non-primary skill player who serves as the runner / intermediate /
+// fake recipient for this play. Prefer the motion player (most common in
+// youth flag: motion is the handoff key). Otherwise fall back to a W/X/Y/Z
+// running a near-LOS route, then to whoever is closest to the QB.
+function animPickRunner(state) {
+  const primary = state.primaryTarget;
+  if (state.motion && state.motion.player && state.motion.player !== primary) {
+    return state.motion.player;
+  }
+  const Q = state.formData && state.formData.Q;
+  if (!Q) return null;
+  const candidates = ['W','X','Y','Z'].filter(p =>
+    p !== primary && state.routePresets && state.routePresets[p] &&
+    state.formData[p] && state.routePresets[p] !== 'Snap'
+  );
+  if (!candidates.length) return null;
+  const near = new Set(['Drag','Flat','Slant','Screen','Curl']);
+  const preferred = candidates.filter(p => near.has(state.routePresets[p]));
+  const pool = preferred.length ? preferred : candidates;
+  pool.sort((a, b) =>
+    Math.abs(state.formData[a].x - Q.x) - Math.abs(state.formData[b].x - Q.x)
+  );
+  return pool[0];
+}
+
+// Returns an ordered list of ball segments for the routes phase. Each segment
+// describes a linear carry between two anchor points over a sub-interval of
+// route time. Anchor ids: 'Q' (QB), 'R' (runner / intermediate), 'P' (primary).
+// A segment with from === to keeps the ball with that player while they move.
+function animBallSegments(action, hasRunner) {
+  const passLike = [
+    { from: 'Q', to: 'Q', start: 0.0,  end: 0.52 },
+    { from: 'Q', to: 'P', start: 0.52, end: 1.0, arc: 70 }
+  ];
+  switch (action) {
+    case 'sweep':
+      return [
+        { from: 'Q', to: 'P', start: 0.02, end: 0.14, arc: 12 },
+        { from: 'P', to: 'P', start: 0.14, end: 1.0 }
+      ];
+    case 'reverse':
+      if (!hasRunner) {
+        return [
+          { from: 'Q', to: 'P', start: 0.02, end: 0.14, arc: 12 },
+          { from: 'P', to: 'P', start: 0.14, end: 1.0 }
+        ];
+      }
+      return [
+        { from: 'Q', to: 'R', start: 0.02, end: 0.14, arc: 10 },
+        { from: 'R', to: 'R', start: 0.14, end: 0.28 },
+        { from: 'R', to: 'P', start: 0.28, end: 0.42, arc: 10 },
+        { from: 'P', to: 'P', start: 0.42, end: 1.0 }
+      ];
+    case 'halfback_pass':
+      if (!hasRunner) return passLike;
+      return [
+        { from: 'Q', to: 'R', start: 0.02, end: 0.14, arc: 10 },
+        { from: 'R', to: 'R', start: 0.14, end: 0.55 },
+        { from: 'R', to: 'P', start: 0.55, end: 1.0, arc: 80 }
+      ];
+    case 'flea_flicker':
+      if (!hasRunner) return passLike;
+      return [
+        { from: 'Q', to: 'R', start: 0.02, end: 0.13, arc: 10 },
+        { from: 'R', to: 'R', start: 0.13, end: 0.22 },
+        { from: 'R', to: 'Q', start: 0.22, end: 0.33, arc: 18 },
+        { from: 'Q', to: 'Q', start: 0.33, end: 0.62 },
+        { from: 'Q', to: 'P', start: 0.62, end: 1.0, arc: 80 }
+      ];
+    case 'double_pass':
+      if (!hasRunner) return passLike;
+      return [
+        { from: 'Q', to: 'R', start: 0.02, end: 0.18, arc: 25 },
+        { from: 'R', to: 'R', start: 0.18, end: 0.55 },
+        { from: 'R', to: 'P', start: 0.55, end: 1.0, arc: 70 }
+      ];
+    case 'play_action':
+      return [
+        { from: 'Q', to: 'Q', start: 0.0,  end: 0.60 },
+        { from: 'Q', to: 'P', start: 0.60, end: 1.0, arc: 70 }
+      ];
+    case 'drop_back':
+    case 'screen':
+    case 'rollout_boot':
+    case 'throwback':
+    default:
+      return passLike;
+  }
+}
+
+// Real ball position. Pre-snap on the Center, arcs to the QB on the snap, then
+// follows whichever segment of the action's ball path is currently active.
 function animComputeBall(state, scaleY) {
   const phase = state.phase;
   const posC = state.positions.C;
   const posQ = state.positions.Q;
-  const primary = state.primaryTarget && state.positions[state.primaryTarget];
-
   if (!posC || !posQ) return null;
-
   const toDisp = p => ({ x: p.x, y: p.y * scaleY });
 
-  if (phase === 'idle' || phase === 'motion') {
-    return { pos: toDisp(posC), fake: null };
-  }
+  if (phase === 'idle' || phase === 'motion') return toDisp(posC);
 
   if (phase === 'snap') {
-    const t = Math.min(1, state.snapT / 400);
+    const t = Math.min(1, state.snapT / 180);
     const cd = toDisp(posC), qd = toDisp(posQ);
     return {
-      pos: {
-        x: cd.x + (qd.x - cd.x) * t,
-        y: cd.y + (qd.y - cd.y) * t - 14 * Math.sin(Math.PI * t)
-      },
-      fake: null
+      x: cd.x + (qd.x - cd.x) * t,
+      y: cd.y + (qd.y - cd.y) * t - 14 * Math.sin(Math.PI * t)
     };
   }
 
-  // Routes or done — compute based on action.
   const rt = (phase === 'routes') ? state.routeT : 1;
-  const action = state.action;
-  const isRun = RUN_ACTIONS.has(action);
-  const hasFake = FAKE_ACTIONS.has(action);
-  const qd = toDisp(posQ);
-  const pd = primary ? toDisp(primary) : qd;
+  const runnerKey = state._runner;
+  const pR = runnerKey && state.positions[runnerKey];
+  const pP = state.primaryTarget && state.positions[state.primaryTarget];
+  const posAt = (id) => {
+    if (id === 'Q') return toDisp(posQ);
+    if (id === 'C') return toDisp(posC);
+    if (id === 'R') return pR ? toDisp(pR) : toDisp(posQ);
+    if (id === 'P') return pP ? toDisp(pP) : toDisp(posQ);
+    return null;
+  };
 
-  // Fake badge window: pulses above the QB for the first third of the play.
-  let fake = null;
-  if (hasFake && rt >= 0.08 && rt <= 0.38) {
-    const u = (rt - 0.08) / 0.30;                 // 0..1 across the window
-    const env = Math.sin(Math.PI * u);             // 0..1..0
-    const pulse = 0.85 + 0.25 * env;
-    fake = { x: qd.x, y: qd.y - 44, pulse };
+  const segments = animBallSegments(state.action, !!runnerKey);
+  let active = null, lastDone = null;
+  for (const seg of segments) {
+    if (rt < seg.start) break;
+    if (rt <= seg.end) { active = seg; break; }
+    lastDone = seg;
   }
+  if (active) {
+    const span = active.end - active.start;
+    const t = span > 0 ? (rt - active.start) / span : 0;
+    const from = posAt(active.from), to = posAt(active.to);
+    const arc = active.arc || 0;
+    return {
+      x: from.x + (to.x - from.x) * t,
+      y: from.y + (to.y - from.y) * t - arc * Math.sin(Math.PI * t)
+    };
+  }
+  if (lastDone) return posAt(lastDone.to);
+  return posAt(segments[0].from);
+}
 
-  if (isRun) {
-    const HANDOFF_END = 0.18;
-    if (rt < 0.04) {
-      return { pos: qd, fake };
-    }
-    if (rt < HANDOFF_END) {
-      const t = (rt - 0.04) / (HANDOFF_END - 0.04);
-      return {
-        pos: {
-          x: qd.x + (pd.x - qd.x) * t,
-          y: qd.y + (pd.y - qd.y) * t - 12 * Math.sin(Math.PI * t)
-        },
-        fake
-      };
-    }
-    return { pos: pd, fake };
-  }
-
-  // Pass play — ball rides with the QB until release, then arcs to the primary.
-  const release = hasFake ? 0.62 : 0.52;
-  if (rt < release) {
-    return { pos: qd, fake };
-  }
-  const t = Math.min(1, (rt - release) / (1 - release));
+// Play-action only. Returns the dashed arrow, semi-transparent ghost football,
+// and "FAKE HANDOFF" label that together illustrate the mimed handoff. The
+// real ball is still drawn at the QB during this window.
+function animComputeFakeHandoff(state, scaleY) {
+  if (state.action !== 'play_action') return null;
+  if (state.phase !== 'routes' && state.phase !== 'done') return null;
+  const runnerKey = state._runner;
+  if (!runnerKey) return null;
+  const q = state.positions.Q, r = state.positions[runnerKey];
+  if (!q || !r) return null;
+  const rt = state.phase === 'routes' ? state.routeT : 1;
+  const FAKE_START = 0.02, FAKE_END = 0.34;
+  if (rt < FAKE_START || rt > FAKE_END) return null;
+  const qd = { x: q.x, y: q.y * scaleY };
+  const rd = { x: r.x, y: r.y * scaleY };
+  const t = (rt - FAKE_START) / (FAKE_END - FAKE_START);
+  // Ghost football: extends ~70% toward runner, holds, then returns — like a
+  // real play-action ride-and-pull.
+  let s;
+  if (t < 0.38) s = (t / 0.38) * 0.7;
+  else if (t < 0.62) s = 0.7;
+  else s = 0.7 * (1 - (t - 0.62) / 0.38);
+  const ghost = { x: qd.x + (rd.x - qd.x) * s, y: qd.y + (rd.y - qd.y) * s };
+  const pulse = 0.85 + 0.25 * Math.sin(Math.PI * Math.min(1, t * 1.4));
+  // Clamp the label inside the 800-wide canvas so it never clips.
+  const labelX = Math.max(80, Math.min(720, rd.x));
   return {
-    pos: {
-      x: qd.x + (pd.x - qd.x) * t,
-      y: qd.y + (pd.y - qd.y) * t - 70 * Math.sin(Math.PI * t)
-    },
-    fake
+    arrow: { from: qd, to: rd },
+    ghost,
+    label: { x: labelX, y: rd.y - 30, text: 'FAKE → ' + runnerKey, pulse }
   };
 }
 
@@ -5816,7 +5912,7 @@ function animRender() {
   const canvas = document.getElementById('animCanvas');
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
-  const scaleY = H / 640; // map 640-space y to 580-space
+  const scaleY = H / 640;
 
   ctx.clearRect(0, 0, W, H);
   animDrawField(ctx, W, H);
@@ -5824,24 +5920,37 @@ function animRender() {
   const phase = animState.phase;
   const rt = (phase === 'routes') ? animState.routeT : (phase === 'done' ? 1 : 0);
 
-  // Draw routes
   if (rt > 0) {
-    ['C','Q','W','X','Y','Z'].forEach(pos => {
-      animDrawRoute(ctx, pos, rt, scaleY);
-    });
+    ['C','Q','W','X','Y','Z'].forEach(pos => animDrawRoute(ctx, pos, rt, scaleY));
   }
 
-  // Draw players
   ['C','Q','W','X','Y','Z'].forEach(pos => {
     const p = animState.positions[pos];
     if (!p) return;
     animDrawPlayer(ctx, pos, p.x, p.y * scaleY, false, animState.primaryTarget);
   });
 
-  // Ball + FAKE badge on top of everything else.
-  const ball = animComputeBall(animState, scaleY);
-  if (ball && ball.pos) animDrawBall(ctx, ball.pos.x, ball.pos.y);
-  if (ball && ball.fake) animDrawFakeBadge(ctx, ball.fake.x, ball.fake.y, ball.fake.pulse);
+  // Real ball.
+  const bp = animComputeBall(animState, scaleY);
+  if (bp) animDrawBall(ctx, bp.x, bp.y);
+
+  // Play-action fake handoff: dashed arrow QB → recipient, ghost football
+  // miming the ride, and a "FAKE HANDOFF → <pos>" label over the recipient.
+  const fh = animComputeFakeHandoff(animState, scaleY);
+  if (fh) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(220,50,50,0.8)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 6]);
+    ctx.beginPath();
+    ctx.moveTo(fh.arrow.from.x, fh.arrow.from.y);
+    ctx.lineTo(fh.arrow.to.x, fh.arrow.to.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+    animDrawBall(ctx, fh.ghost.x, fh.ghost.y, 0.5);
+    animDrawCalloutBadge(ctx, fh.label.x, fh.label.y, fh.label.text, fh.label.pulse);
+  }
 }
 
 function animLoop(ts) {
@@ -5850,7 +5959,7 @@ function animLoop(ts) {
   const dt = (ts - animState.lastT) * animGetSpeed();
   animState.lastT = ts;
 
-  const MOTION_DUR = 1400, SNAP_DUR = 400, ROUTE_DUR = 2200;
+  const MOTION_DUR = 1400, SNAP_DUR = 180, ROUTE_DUR = 2200;
 
   if (animState.phase === 'motion') {
     animState.motionT += dt;
