@@ -5366,6 +5366,24 @@ function resolvePlaySchema(block) {
         ? (validatedDir === 'right' ? 1 : -1)
         : defaultDir;
       const dir = schema.action === 'reverse' ? -motionDir : motionDir;
+      // Reverse: route the primary BACK to the meet point first (so the
+      // handoff is a real exchange, not a long pitch), then cut upfield.
+      if (schema.action === 'reverse' && block.motion && block.motion.player) {
+        const R = schema.postMotion[block.motion.player];
+        const Qp = schema.postMotion.Q;
+        const meet = reverseMeetPoint(R, start, Qp && Qp.y);
+        if (meet) {
+          schema.routes[pos] = {
+            points: [
+              { x: start.x, y: start.y },
+              { x: meet.x, y: meet.y },
+              { x: meet.x + 330 * dir, y: meet.y - 290 }
+            ],
+            label: 'Reverse', style: 'solid', color
+          };
+          return;
+        }
+      }
       schema.routes[pos] = {
         points: [
           { x: start.x, y: start.y },
@@ -5377,6 +5395,26 @@ function resolvePlaySchema(block) {
         color
       };
       return;
+    }
+
+    // Reverse intermediate runner: override their pass-route preset with
+    // a short "lateral to meet" path so the static diagram shows both
+    // runners actually converging for the second exchange.
+    if (schema.action === 'reverse' && block.motion && pos === block.motion.player &&
+        pos !== schema.primaryTarget) {
+      const P0 = schema.postMotion[schema.primaryTarget];
+      const Qp = schema.postMotion.Q;
+      const meet = reverseMeetPoint(start, P0, Qp && Qp.y);
+      if (meet) {
+        schema.routes[pos] = {
+          points: [
+            { x: start.x, y: start.y },
+            { x: meet.x, y: meet.y }
+          ],
+          label: 'Handoff', style: 'solid', color
+        };
+        return;
+      }
     }
 
     const preset = block.routePresets && block.routePresets[pos];
@@ -5397,12 +5435,38 @@ function resolvePlaySchema(block) {
   // Action-specific overlays.
   const Q = schema.postMotion.Q;
   const primary = schema.primaryTarget && schema.postMotion[schema.primaryTarget];
-  if ((schema.action === 'sweep' || schema.action === 'reverse') && Q && primary) {
+  if (schema.action === 'reverse' && Q && primary && block.motion && block.motion.player) {
+    // Reverse draws TWO handoffs: QB → intermediate, then intermediate → primary
+    // (who is at the meet point after their come-back leg).
+    const R = schema.postMotion[block.motion.player];
+    const meet = reverseMeetPoint(R, primary, Q.y);
+    if (R && meet) {
+      schema.overlays.push({
+        kind: 'handoff',
+        from: { x: Q.x, y: Q.y },
+        to: { x: R.x, y: R.y },
+        label: 'Handoff'
+      });
+      schema.overlays.push({
+        kind: 'handoff',
+        from: { x: R.x, y: R.y },
+        to: { x: meet.x, y: meet.y },
+        label: 'Reverse'
+      });
+    } else {
+      schema.overlays.push({
+        kind: 'handoff',
+        from: { x: Q.x, y: Q.y },
+        to: { x: primary.x, y: primary.y },
+        label: 'Reverse'
+      });
+    }
+  } else if (schema.action === 'sweep' && Q && primary) {
     schema.overlays.push({
       kind: 'handoff',
       from: { x: Q.x, y: Q.y },
       to: { x: primary.x, y: primary.y },
-      label: schema.action === 'reverse' ? 'Reverse' : 'Handoff'
+      label: 'Handoff'
     });
   } else if (schema.action === 'play_action' && Q) {
     // Pick a fake recipient: motion player if non-primary, else the
@@ -5914,7 +5978,10 @@ function animDrawRoute(ctx, pos, t, scaleY) {
   const isCarrier = pos === animState.primaryTarget &&
     (animState.action === 'sweep' || animState.action === 'reverse');
   if (isCarrier) {
-    const carrierStart = animState.action === 'sweep' ? 0.14 : 0.42;
+    // Sweep carrier waits for the QB-to-primary handoff before their route
+    // starts drawing. Reverse primary begins their "come back to meet"
+    // leg at the snap so the route line appears from t=0.
+    const carrierStart = animState.action === 'sweep' ? 0.14 : 0;
     if (t < carrierStart) return;
     t = (t - carrierStart) / (1 - carrierStart);
   }
@@ -6186,10 +6253,25 @@ function aiCategoryFromName(playName) {
   return aiCategoryFromText(playName);
 }
 // Best-guess run action id when the block is clearly a run but the AI action
-// field disagrees. Prefers reverse when the name/description mentions it.
+// field disagrees. Prefers reverse when the block encodes a second handoff
+// (a non-QB player hands the ball to another non-QB player), even when the
+// literal word "reverse" isn't present — a "W Handoff to Z" play is
+// structurally a reverse. Without this, the block coerces to a single-
+// handoff sweep and the second exchange is invisible.
+const INTERMEDIATE_HANDOFF_RE = /\bhands?\s+(?:it|off|the\s+ball)\s+(?:off\s+)?(?:back\s+)?to\b|\bhands?\s+off\s+to\b|\bgives?\s+(?:the\s+)?ball\s+to\b|\blaterals?\s+(?:it\s+)?to\b|\bpitch(?:es|ed)?\s+(?:it\s+)?(?:back\s+)?to\b/i;
+function aiHasIntermediateHandoff(b) {
+  if (!b || !b.routes) return false;
+  for (const [pos, desc] of Object.entries(b.routes)) {
+    if (pos === 'Q' || pos === 'C' || !desc) continue;
+    if (INTERMEDIATE_HANDOFF_RE.test(desc)) return true;
+  }
+  return false;
+}
 function aiDefaultRunAction(b) {
   const text = ((b && b.playType) || '') + ' ' + ((b && b.primaryTarget && b.routes && b.routes[b.primaryTarget]) || '');
-  return /reverse|end.?around/i.test(text) ? 'reverse' : 'sweep';
+  if (/reverse|end.?around/i.test(text)) return 'reverse';
+  if (aiHasIntermediateHandoff(b)) return 'reverse';
+  return 'sweep';
 }
 function aiDefaultPassAction(b) {
   const text = ((b && b.playType) || '') + ' ' + ((b && b.primaryTarget && b.routes && b.routes[b.primaryTarget]) || '');
@@ -6217,6 +6299,14 @@ function coerceAIBlockAction(b, filter) {
     b.action = aiDefaultRunAction(b);
   } else if ((filter === 'pass' || cat === 'pass') && isRun) {
     b.action = aiDefaultPassAction(b);
+  }
+  // Upgrade sweep → reverse when the block encodes a second (non-QB) handoff.
+  // normalizeAIAction + inferActionFromName only look at the name, so a
+  // "W Handoff to Z" play that names the first exchange lands on sweep even
+  // though a second exchange lives in the routes. Reverse is the action that
+  // actually animates two handoffs.
+  if ((b.action || '').toLowerCase() === 'sweep' && aiHasIntermediateHandoff(b)) {
+    b.action = 'reverse';
   }
 }
 
@@ -6385,6 +6475,15 @@ function normalizeAIAction(raw, playName) {
 // upfield. Direction matches motion for sweeps and reverses motion for
 // reverses, so the picture agrees with the play schema even when the AI
 // picked a pass route for the carrier in routePresets.
+// Midpoint behind the LOS where the intermediate runner (R) and the primary
+// (P) converge on a reverse. Both players end up at this point at the handoff
+// moment so the ball exchange is hand-to-hand, not a long-distance pitch.
+function reverseMeetPoint(R, P, QBy) {
+  if (!R || !P) return null;
+  const meetX = Math.round((R.x + P.x) / 2);
+  const floor = Math.max(R.y, P.y, (QBy || 560)) + 10;
+  return { x: meetX, y: Math.min(620, floor) };
+}
 function animCarrierRunPath(state, pos) {
   if (!state || pos !== state.primaryTarget) return null;
   if (state.action !== 'sweep' && state.action !== 'reverse') return null;
@@ -6396,15 +6495,34 @@ function animCarrierRunPath(state, pos) {
     ? (state.motion.direction === 'right' ? 1 : -1)
     : defaultDir;
   const dir = state.action === 'reverse' ? -motionDir : motionDir;
-  // Offsets match resolvePlaySchema so the static diagram arrow and the
-  // animated arrow are stroke-for-stroke identical.
+  // Reverse: three-waypoint path. Primary runs BACK to the meet point to
+  // take the handoff, then cuts upfield from there. Without this the
+  // primary sits at the LOS and the "handoff" becomes a 150px+ pitch.
+  if (state.action === 'reverse') {
+    const runnerKey = state._runner;
+    const R = runnerKey && state.formData && state.formData[runnerKey];
+    const Q = state.formData && state.formData.Q;
+    const meet = reverseMeetPoint(R, start, Q && Q.y);
+    if (meet) {
+      return {
+        points: [
+          { dx: meet.x - start.x, dy: meet.y - start.y },      // come back to meet R
+          { dx: meet.x - start.x + 330 * dir, dy: meet.y - start.y - 290 } // cut upfield
+        ],
+        type: 'solid',
+        label: 'Reverse'
+      };
+    }
+  }
+  // Sweep: existing two-waypoint path. Offsets match resolvePlaySchema so
+  // the static diagram arrow and the animated arrow stay stroke-for-stroke.
   return {
     points: [
       { dx: 90 * dir, dy: 30 },     // short lateral step behind the LOS
       { dx: 330 * dir, dy: -290 }   // hard cut upfield, continuing toward the sideline
     ],
     type: 'solid',
-    label: state.action === 'reverse' ? 'Reverse' : 'Sweep'
+    label: 'Sweep'
   };
 }
 
@@ -6466,9 +6584,9 @@ function animBallSegments(action, hasRunner) {
       }
       return [
         { from: 'Q', to: 'R', start: 0.02, end: 0.14, arc: 10 },
-        { from: 'R', to: 'R', start: 0.14, end: 0.28 },
-        { from: 'R', to: 'P', start: 0.28, end: 0.42, arc: 10 },
-        { from: 'P', to: 'P', start: 0.42, end: 1.0 }
+        { from: 'R', to: 'R', start: 0.14, end: 0.42 },   // R carries to the meet point
+        { from: 'R', to: 'P', start: 0.42, end: 0.46, arc: 0 }, // hand-to-hand (R & P are now at the same point)
+        { from: 'P', to: 'P', start: 0.46, end: 1.0 }
       ];
     case 'halfback_pass':
       if (!hasRunner) return passLike;
@@ -6699,13 +6817,45 @@ function animLoop(ts) {
     animState.animT += dt;
     animState.routeT = Math.min(1, animState.animT / ROUTE_DUR);
 
-    // Move players along routes. The ball carrier on sweep/reverse waits at
-    // the handoff spot until they actually receive the ball, then follows a
-    // synthesized sweep path — independent of whatever pass route the AI
-    // happened to pick for them.
-    const carrierStartByAction = { sweep: 0.14, reverse: 0.42 };
+    // Move players along routes. The ball carrier on sweep waits at the
+    // handoff spot until they actually receive the ball, then follows a
+    // synthesized sweep path. On reverse, the primary runs their come-back
+    // leg from the snap so they arrive at the meet point exactly when the
+    // second handoff fires (t=0.42), then take the upfield leg to the end.
+    const carrierStartByAction = { sweep: 0.14, reverse: 0 };
     const carrierStart = carrierStartByAction[animState.action] || 0;
+    // Reverse intermediate runner: during [0.14, 0.42] run from post-motion
+    // spot to the meet point, then hold. We override their preset so the
+    // player whose role is to carry-then-hand-off actually moves into the
+    // exchange instead of running their AI-assigned pass route.
+    const runnerKey = animState._runner;
+    const reverseRunnerMeet = (animState.action === 'reverse' && runnerKey
+      ? reverseMeetPoint(
+          animState.formData[runnerKey],
+          animState.formData[animState.primaryTarget],
+          animState.formData.Q && animState.formData.Q.y)
+      : null);
     ['C','Q','W','X','Y','Z'].forEach(pos => {
+      // Reverse intermediate runner override (before the routeDef lookup so
+      // we can ignore whatever routePreset the AI gave them).
+      if (reverseRunnerMeet && pos === runnerKey && pos !== animState.primaryTarget) {
+        const start = animState.formData[pos];
+        if (!start) return;
+        const HOLD = 0.14, ARRIVE = 0.42;
+        const rt = animState.routeT;
+        if (rt <= HOLD) {
+          animState.positions[pos] = { x: start.x, y: start.y };
+        } else if (rt >= ARRIVE) {
+          animState.positions[pos] = { x: reverseRunnerMeet.x, y: reverseRunnerMeet.y };
+        } else {
+          const k = (rt - HOLD) / (ARRIVE - HOLD);
+          animState.positions[pos] = {
+            x: start.x + (reverseRunnerMeet.x - start.x) * k,
+            y: start.y + (reverseRunnerMeet.y - start.y) * k
+          };
+        }
+        return;
+      }
       const routeDef = animGetRouteDef(animState, pos);
       if (!routeDef) {
         // QB drop back
@@ -6717,10 +6867,27 @@ function animLoop(ts) {
       }
       const start = animState.formData[pos];
       if (!start) return;
-      // For the run carrier, stay put until the handoff completes, then run
-      // the synthesized path over the remaining time.
       const isCarrier = pos === animState.primaryTarget &&
         (animState.action === 'sweep' || animState.action === 'reverse');
+      // Reverse primary: piecewise interp so the meet point (waypoint 1) is
+      // hit at exactly t=0.42, aligning with the ball's second-handoff
+      // segment. Arc-length interp would hit it at ~0.24 (the first leg is
+      // much shorter than the upfield leg), making the primary arrive early.
+      if (isCarrier && animState.action === 'reverse' && routeDef.points.length >= 2) {
+        const p0 = { x: start.x, y: start.y };
+        const p1 = { x: start.x + routeDef.points[0].dx, y: start.y + routeDef.points[0].dy };
+        const p2 = { x: start.x + routeDef.points[1].dx, y: start.y + routeDef.points[1].dy };
+        const MEET_T = 0.42;
+        const rt = animState.routeT;
+        if (rt <= MEET_T) {
+          const k = rt / MEET_T;
+          animState.positions[pos] = { x: p0.x + (p1.x - p0.x) * k, y: p0.y + (p1.y - p0.y) * k };
+        } else {
+          const k = (rt - MEET_T) / (1 - MEET_T);
+          animState.positions[pos] = { x: p1.x + (p2.x - p1.x) * k, y: p1.y + (p2.y - p1.y) * k };
+        }
+        return;
+      }
       let effT;
       if (isCarrier) {
         if (animState.routeT < carrierStart) {
