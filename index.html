@@ -4608,6 +4608,98 @@ PRE-SNAP MOTION (use when it helps the concept):
 - Never describe motion using words like "up to the LOS," "toward the line," "across the line pre-snap," "press the LOS," "creep forward," "in front of the center," or anything that implies forward or same-side motion.
 - Include a short human-readable description so the coach can see what the motion is.
 
+========================================
+ANIMATION GRAMMAR — what each \`action\` LOOKS like on our animator
+========================================
+This app renders your JSON into a moving canvas. The animator reads
+\`action\`, \`primaryTarget\`, \`motion\`, \`routePresets\`, and the per-player
+\`routes\` descriptions TOGETHER. For the animation to match intent,
+these fields must tell ONE coherent story.
+
+RUN ACTIONS (ball carrier crosses the LOS on foot; NO forward pass)
+
+- sweep
+  Visual: QB takes snap → short pitch/handoff to carrier behind LOS
+  (the canvas shows a quick ~1-step exchange) → carrier runs laterally
+  then turns upfield toward the motion-direction sideline.
+  Required:
+    • primaryTarget IS the ball carrier (prefer the MOTION player).
+    • routes[primaryTarget] describes a CARRY: "takes the pitch and
+      sweeps right", "receives the handoff, turns upfield". NEVER a
+      downfield pass route (Fly/Post/Corner/Fade/Dig).
+    • motion is strongly preferred; motion direction = sweep side.
+
+- reverse
+  Visual: QB → runner A (first handoff/pitch going one way) → runner A
+  → runner B (second handoff going the OPPOSITE way) → runner B carries.
+  Required:
+    • primaryTarget = runner B (final carrier).
+    • routes[runnerA]: "takes the handoff, pitches to [B] going left".
+    • routes[primaryTarget]: "takes the reverse from [A] and runs left".
+    • reverse direction is OPPOSITE the motion direction.
+
+PASS ACTIONS (end with EXACTLY one forward pass from behind the LOS)
+
+- drop_back
+  Visual: QB drops straight back, throws to primary.
+  Required: primaryTarget is a receiver on a downfield route. No
+  "handoff/pitch/sweep" language anywhere on the primary.
+
+- play_action
+  Visual: QB mimes a handoff to a runner (canvas draws a FAKE HANDOFF
+  arrow + label) for the first ~0.3 of the play, THEN drops and throws.
+  Required:
+    • A non-primary skill player gets a SHORT near-LOS route to sell
+      the fake — prefer the MOTION player or the W/X/Y/Z closest to QB.
+      Their routes entry must say "sells the fake handoff then runs
+      flat/drag". Do NOT put the fake recipient on a deep vertical.
+    • primaryTarget is a different player on a downfield pass route.
+
+- rollout_boot
+  Visual: QB boots laterally out of the pocket, then throws while moving.
+  Required: routes[Q] says "Snap, boots right, throws on the run".
+  primaryTarget is on the rollout side (Out/Corner/Flat/Comeback).
+
+- screen
+  Visual: short pass to a receiver at/behind the LOS; they turn upfield.
+  Required: routePresets[primaryTarget] = "Screen" or "Flat"; other
+  receivers clear out deep to pull coverage.
+
+- halfback_pass
+  Visual: QB hands off behind LOS → runner throws the forward pass.
+  Required:
+    • The runner receiving the handoff is NOT primaryTarget.
+    • routes[runner]: "takes the handoff and throws to [primary]".
+    • routes[primaryTarget]: "runs a [Post/Fly/Corner] and catches the
+      deep pass from [runner]".
+
+- flea_flicker
+  Visual: QB hands off forward → runner flicks back to QB behind LOS →
+  QB throws deep.
+  Required: two exchanges in the routes descriptions, then a deep pass
+  route for primaryTarget.
+
+- throwback
+  Visual: play flows one side (sweep/rollout); thrower pivots and throws
+  BACK to a backside receiver crossing behind the LOS.
+  Required: primaryTarget = the BACKSIDE receiver (not the one flowing).
+
+INTERNAL CONSISTENCY CHECK (run before emitting each play):
+  1. Does routes[primaryTarget] describe what \`action\` requires —
+     CARRY (sweep/reverse) vs CATCH (everything else)?
+  2. For sweep/reverse: is primaryTarget a ball carrier (backfield /
+     motion player), not a slot/outside receiver on a deep route?
+  3. For play_action / halfback_pass / flea_flicker: is there a
+     non-primary player whose routes entry explicitly mentions
+     "takes the handoff" or "sells the fake"?
+  4. For run actions with motion, does motion.direction match the
+     sweep side (or, for reverse, the INITIAL handoff direction)?
+  5. Does the play NAME agree with the action? "Sweep" → sweep,
+     "Play Action X" → play_action, "Four Verticals" → drop_back.
+
+If any answer is "no", REWRITE the play before emitting.
+========================================
+
 You MUST include "formation" and "routePresets" for every new play. Include "motion" whenever the concept uses pre-snap motion.` : 'MODE: Only select plays from the existing playbook. Do NOT invent new plays.'}
 
 OUTPUT FORMAT — respond with ONLY valid JSON, no markdown fences:
@@ -4640,7 +4732,7 @@ ${mode === 'suggest' ? `For new plays, use this format:
   "motion": {"player":"Y","type":"Jet","direction":"right","description":"Y jet motion right across behind QB before the snap"}
 }
 The "motion" field is optional. Omit it if the play has no pre-snap motion. If included, player must be W, X, Y, or Z; type must be one of "Jet" / "Orbit" / "Short"; direction must be "left" or "right".
-The "action" field should be one of: drop_back, play_action, rollout_boot, sweep, reverse, halfback_pass, double_pass, flea_flicker, throwback, screen. If the coach supplied an "Allowed Actions" list above, you MUST pick exclusively from that list.` : ''}
+The "action" field should be one of: drop_back, play_action, rollout_boot, sweep, reverse, halfback_pass, flea_flicker, throwback, screen. If the coach supplied an "Allowed Actions" list above, you MUST pick exclusively from that list. DO NOT output double_pass — flag football only allows one forward pass; use throwback or halfback_pass instead.` : ''}
 
 Generate a block of 3-5 plays sequenced strategically.`;
 
