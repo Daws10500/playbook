@@ -4100,6 +4100,13 @@ function updateDefenseDiagram() {
   wrap.style.display = '';
   renderDefenseDiagram(val);
 }
+// Persists the coach's defense pick into module state so it survives the
+// full renderAI() rewrite that happens on every mode/filter/chip toggle,
+// then refreshes the diagram.
+function onAIDefenseChange(val) {
+  aiSelectedDefense = val || '';
+  updateDefenseDiagram();
+}
 
 const ANTHROPIC_MODELS = [
   {id:'claude-opus-4-7',   name:'Claude Opus 4.7'},
@@ -4144,6 +4151,12 @@ let aiMode = 'existing'; // 'existing' or 'suggest'
 let aiPlayTypeFilter = 'any';   // 'any' | 'pass' | 'run' — filters chip list and constrains AI
 let aiActionTags = new Set();   // selected PLAY_ACTIONS ids (empty = no restriction)
 let aiCurrentResult = null;
+// Defense and game-context selections live in module state so they survive
+// the innerHTML rewrite that renderAI does every time the coach toggles a
+// mode, play-type filter, or action chip. Without this, picking a defense
+// then touching any other control would reset the dropdown to "-- Select --".
+let aiSelectedDefense = '';
+let aiSelectedGame = '__none__';
 
 function loadOllamaCloudModels() {
   try {
@@ -5123,16 +5136,19 @@ function renderAI() {
   html += '</div>';
 
   // Defense selector
+  const selectedDef = aiSelectedDefense || '';
+  const selAttr = v => (v === selectedDef ? ' selected' : '');
   html += '<div class="ai-form-group"><label>Opposing Defense</label>';
-  html += '<select id="aiDefenseSelect" onchange="updateDefenseDiagram()">';
-  html += '<option value="">-- Select Defense --</option>';
+  html += '<select id="aiDefenseSelect" onchange="onAIDefenseChange(this.value)">';
+  html += '<option value=""' + selAttr('') + '>-- Select Defense --</option>';
   Object.entries(DEFENSE_CATEGORIES).forEach(([cat, defs]) => {
     html += '<optgroup label="' + cat + '">';
-    defs.forEach(d => { html += '<option value="' + d + '">' + d + '</option>'; });
+    defs.forEach(d => { html += '<option value="' + d + '"' + selAttr(d) + '>' + d + '</option>'; });
     html += '</optgroup>';
   });
   html += '</select></div>';
-  html += '<div class="defense-diagram-wrap" id="defenseDiagramWrap" style="display:none">';
+  const hasDefDiagram = selectedDef && DEFENSE_DIAGRAMS[selectedDef];
+  html += '<div class="defense-diagram-wrap" id="defenseDiagramWrap" style="display:' + (hasDefDiagram ? '' : 'none') + '">';
   html += '<canvas id="defenseDiagramCanvas" width="280" height="180"></canvas>';
   html += '</div>';
 
@@ -5170,14 +5186,16 @@ function renderAI() {
   }
 
   // Game context selector
+  const selectedGame = aiSelectedGame || '__none__';
+  const gameSel = v => (v === selectedGame ? ' selected' : '');
   html += '<div class="ai-form-group"><label>Game Context (optional)</label>';
-  html += '<select id="aiGameSelect">';
-  html += '<option value="__none__">No game stats</option>';
+  html += '<select id="aiGameSelect" onchange="aiSelectedGame = this.value">';
+  html += '<option value="__none__"' + gameSel('__none__') + '>No game stats</option>';
   games.forEach(g => {
     const label = g.opponent ? ('vs ' + g.opponent + ' - ' + g.date) : g.name;
-    html += '<option value="' + g.id + '">' + label + '</option>';
+    html += '<option value="' + g.id + '"' + gameSel(g.id) + '>' + label + '</option>';
   });
-  html += '<option value="__all__">All Games Combined</option>';
+  html += '<option value="__all__"' + gameSel('__all__') + '>All Games Combined</option>';
   html += '</select></div>';
 
   // Generate button
@@ -5208,6 +5226,11 @@ function renderAI() {
   }
 
   c.innerHTML = html;
+  // The defense canvas we just rebuilt is blank — repaint the diagram if a
+  // defense is already picked so it survives mode / filter / chip toggles.
+  if (aiSelectedDefense && DEFENSE_DIAGRAMS[aiSelectedDefense]) {
+    renderDefenseDiagram(aiSelectedDefense);
+  }
 }
 
 function setAIMode(mode) {
