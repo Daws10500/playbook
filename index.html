@@ -5807,11 +5807,32 @@ function inferActionFromName(name) {
   if (/sweep|jet|handoff|\brun\b|draw/.test(n)) return 'sweep';
   return '';
 }
+// Classify a play name as 'run' / 'pass' / '' — unambiguous only. A name like
+// "Jet Sweep Pass" has both run and pass tokens, so we return '' and trust
+// the explicit action. Used to detect when the AI's action field contradicts
+// a clearly run- or pass-named play.
+function aiCategoryFromName(playName) {
+  const n = (playName || '').toLowerCase();
+  const hasPass = /\bpass\b|drop.?back|play.?action|\bpa\b|rollout|boot|screen|flicker|throw.?back|halfback.?pass|double.?pass/.test(n);
+  const hasRun  = /sweep|jet|handoff|\brun\b|draw|reverse|end.?around|counter/.test(n);
+  if (hasRun && !hasPass) return 'run';
+  if (hasPass && !hasRun) return 'pass';
+  return '';
+}
 function normalizeAIAction(raw, playName) {
   const s = (raw == null ? '' : String(raw)).toLowerCase().trim().replace(/[-\s]+/g, '_');
-  if (AI_ACTION_CANONICAL.has(s)) return s;
-  if (AI_ACTION_SYNONYMS[s]) return AI_ACTION_SYNONYMS[s];
-  return inferActionFromName(playName);
+  const current = AI_ACTION_CANONICAL.has(s) ? s : (AI_ACTION_SYNONYMS[s] || '');
+  const nameInferred = inferActionFromName(playName);
+  if (!current) return nameInferred;
+  // If the name is unambiguously a run/pass and the explicit action is the
+  // other category, prefer the name — some models mislabel a "Jet Sweep" or
+  // "Reverse" as drop_back/play_action, which then animates as a forward pass
+  // instead of a handoff/run.
+  const runIds = new Set(['sweep', 'reverse']);
+  const currentCat = runIds.has(current) ? 'run' : 'pass';
+  const nameCat = aiCategoryFromName(playName);
+  if (nameCat && nameCat !== currentCat && nameInferred) return nameInferred;
+  return current;
 }
 
 // Pick the non-primary skill player who serves as the runner / intermediate /
@@ -6477,6 +6498,23 @@ async function generatePlayBlock() {
         if (!b.isNew && !b.playNum && b.playType) {
           const match = plays.find(p => p.type === b.playType);
           if (match) b.playNum = match.num;
+        }
+        // Coerce AI-generated action to match the play's name/filter intent so
+        // the stored block, saved-play PASS/RUN badge, and animation agree.
+        // Models sometimes return drop_back/play_action for a run-named play.
+        if (b.isNew) {
+          const normalized = normalizeAIAction(b.action, b.playType);
+          if (normalized) b.action = normalized;
+          if (aiPlayTypeFilter === 'run' && !AI_RUN_ACTION_IDS.has((b.action || '').toLowerCase())) {
+            b.action = /reverse|end.?around/i.test(b.playType || '') ? 'reverse' : 'sweep';
+          } else if (aiPlayTypeFilter === 'pass' && AI_RUN_ACTION_IDS.has((b.action || '').toLowerCase())) {
+            b.action = /play.?action|\bpa\b|fake/i.test(b.playType || '') ? 'play_action'
+                     : /rollout|boot/i.test(b.playType || '') ? 'rollout_boot'
+                     : /screen/i.test(b.playType || '') ? 'screen'
+                     : /flicker/i.test(b.playType || '') ? 'flea_flicker'
+                     : /throw.?back/i.test(b.playType || '') ? 'throwback'
+                     : 'drop_back';
+          }
         }
       });
     }
