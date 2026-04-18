@@ -6103,12 +6103,16 @@ function aiCategoryFromText(text) {
   // because "throwback" is an action word while "jet" just describes
   // the motion. Same for "screen", "flicker", "rollout", "boot",
   // "handoff", "sweep", "reverse", "draw", "counter", "end-around".
-  if (/\bthrow.?back\b|\bflicker\b|\bflea.?flick|\bscreen\b|\brollout\b|\bboot(?:leg)?\b|halfback.?pass|double.?pass|drop.?back|play.?action|\bpa\b/.test(n)) return 'pass';
+  // "fake" is included as a strong-pass token because in practice every
+  // "fake [something]" construction in play names/descriptions implies a
+  // play-action pass concept (15× in the last 23-play corpus).
+  if (/\bthrow.?back\b|\bflicker\b|\bflea.?flick|\bscreen\b|\brollout\b|\bboot(?:leg)?\b|halfback.?pass|double.?pass|drop.?back|play.?action|\bpa\b|\bfake\b/.test(n)) return 'pass';
   if (/\bhandoff\b|hands off|\bsweep\b|\breverse\b|end.?around|\bcounter\b|\bdraw\b/.test(n)) return 'run';
   // Fall-through to weaker tokens — "jet" here is only motion, and
-  // "pass" / "catches" alone are soft pass signals.
+  // "pass" / "catches" alone are soft pass signals. The run verb accepts
+  // run / runs / running so inflected forms ("RB running the ball") match.
   const hasPass = /\bpass\b|thrown|\bthrows\b|\bcatches\b|drops back to throw/.test(n);
-  const hasRun  = /\bjet\b|\bpitch(?:es|ed)?\b|\brun\b|runs the ball|carries|carry|ball.?carrier/.test(n);
+  const hasRun  = /\bjet\b|\bpitch(?:es|ed)?\b|\brun(?:ning|s)?\b|carries|carry|ball.?carrier/.test(n);
   if (hasRun && !hasPass) return 'run';
   if (hasPass && !hasRun) return 'pass';
   return '';
