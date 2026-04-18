@@ -1877,8 +1877,25 @@ function showView(name) {
 
 // ============= GAME PLAN LIST =============
 const playCategories = ['All', 'Pass', 'Handoff', 'Fake', 'Reverse', 'Trick'];
+// Detailed action id → filter-chip category. When a play carries an aiAction
+// it's authoritative; otherwise fall back to name/action heuristics so manually
+// entered plays still land in a reasonable bucket.
+const AI_ACTION_CATEGORY = {
+  reverse: 'Reverse',
+  sweep: 'Handoff',
+  play_action: 'Fake',
+  rollout_boot: 'Pass',
+  drop_back: 'Pass',
+  screen: 'Pass',
+  halfback_pass: 'Trick',
+  double_pass: 'Trick',
+  flea_flicker: 'Trick',
+  throwback: 'Trick'
+};
 function getPlayCategory(p) {
   if (p && p.category) return p.category;
+  const ai = p && p.aiAction ? String(p.aiAction).toLowerCase() : '';
+  if (ai && AI_ACTION_CATEGORY[ai]) return AI_ACTION_CATEGORY[ai];
   const t = ((p && p.type) || '').toLowerCase();
   if (t.includes('trick')) return 'Trick';
   if (t.includes('reverse')) return 'Reverse';
@@ -4356,11 +4373,10 @@ function buildAIPrompt(defense, mode, gameId, playTypeFilter, actionTagIds) {
   let actionConstraints = '';
   if (mode === 'suggest') {
     const tagList = Array.from(actionTagIds || []);
-    if (playTypeFilter && playTypeFilter !== 'any') {
-      actionConstraints += '\n\nCOACH-SELECTED PLAY TYPE: ' + playTypeFilter.toUpperCase() +
-        ' — every new play you design must be a ' + playTypeFilter.toUpperCase() +
-        ' concept. Trick plays that end in a forward ' + playTypeFilter +
-        ' count as this type.';
+    if (playTypeFilter === 'run') {
+      actionConstraints += '\n\nCOACH-SELECTED PLAY TYPE: RUN — every new play you design must END AS A RUN (a ball carrier runs across the LOS with the ball; there is NO forward pass on the play). Only the "sweep" and "reverse" action ids qualify. Do NOT output drop_back, play_action, rollout_boot, screen, halfback_pass, double_pass, flea_flicker, or throwback for this request — all of those end with a forward pass and are therefore pass plays, not run plays.';
+    } else if (playTypeFilter === 'pass') {
+      actionConstraints += '\n\nCOACH-SELECTED PLAY TYPE: PASS — every new play you design must END WITH EXACTLY ONE FORWARD PASS thrown from behind the LOS. Qualifying action ids: drop_back, play_action, rollout_boot, screen, halfback_pass, double_pass, flea_flicker, throwback. Do NOT output sweep or reverse for this request — those are pure runs and do not include a forward pass.';
     }
     if (tagList.length) {
       const lines = tagList
@@ -5121,12 +5137,14 @@ function renderAI() {
     });
     html += '</div></div>';
 
-    // Action-tag chips — filtered by play-type bucket. Trick plays are shown
-    // regardless of Pass/Run because they end in the selected type anyway.
+    // Action-tag chips — filtered by play-type bucket. Every trick play in
+    // the yaml (halfback_pass, double_pass, flea_flicker, throwback) ends with
+    // a forward pass, so they're only offered under Pass. `reverse` is the
+    // only run-variant trick and it's bucketed as 'run' directly.
     html += '<div class="ai-form-group"><label>Allowed Actions <span style="font-weight:400;color:var(--text2);font-size:11px;">(leave empty for all)</span></label>';
     html += '<div class="ai-action-chips">';
     PLAY_ACTIONS.forEach(a => {
-      if (aiPlayTypeFilter !== 'any' && a.bucket !== aiPlayTypeFilter && a.bucket !== 'trick') return;
+      if (!actionMatchesPlayType(a, aiPlayTypeFilter)) return;
       const active = aiActionTags.has(a.id) ? ' active' : '';
       html += '<button class="ai-action-chip' + active + '" onclick="toggleAIActionTag(\'' + a.id + '\')">' + a.label + '</button>';
     });
@@ -5179,6 +5197,18 @@ function setAIMode(mode) {
   renderAI();
 }
 
+// Returns true if a PLAY_ACTION belongs under the coach-chosen play-type
+// filter. 'any' matches everything; 'run' matches only run-bucket actions
+// (sweep, reverse); 'pass' matches pass-bucket plus trick-bucket, since every
+// trick play in our knowledge yaml ends with a forward pass.
+function actionMatchesPlayType(a, playType) {
+  if (!a) return false;
+  if (playType === 'any' || !playType) return true;
+  if (playType === 'run') return a.bucket === 'run';
+  if (playType === 'pass') return a.bucket === 'pass' || a.bucket === 'trick';
+  return false;
+}
+
 function setAIPlayTypeFilter(id) {
   aiPlayTypeFilter = id;
   // Dropping to pass/run could leave a tag from the wrong bucket selected —
@@ -5186,7 +5216,7 @@ function setAIPlayTypeFilter(id) {
   if (id !== 'any') {
     Array.from(aiActionTags).forEach(tagId => {
       const a = PLAY_ACTIONS.find(p => p.id === tagId);
-      if (a && a.bucket !== id && a.bucket !== 'trick') aiActionTags.delete(tagId);
+      if (a && !actionMatchesPlayType(a, id)) aiActionTags.delete(tagId);
     });
   }
   renderAI();
@@ -6219,14 +6249,17 @@ function animatePlayFromPlaybook(playNum) {
   showPlayAnimation(play.formation, play.routePresets, play.type, play.target, play.motion, action);
 }
 
-function addAIPlayToPlaybook(blockIndex) {
-  if (!aiCurrentResult || !aiCurrentResult.block || !aiCurrentResult.block[blockIndex]) return;
-  const b = aiCurrentResult.block[blockIndex];
-  if (!b.isNew) return;
+// Actions whose ball path is a run (ball carrier crosses the LOS on the
+// ground, no forward pass). Used to derive the legacy PASS/RUN field on
+// plays saved from the AI block. Keep in sync with the rule_bucket: run
+// entries in youth_flag_football_knowledge.yaml -> play_actions.
+const AI_RUN_ACTION_IDS = new Set(['sweep', 'reverse']);
 
-  // Defensive re-render — if the diagram wasn't built during showAIResults
-  // (e.g., the result was loaded from history), build it now so the play
-  // always has an image when it lands in the playbook.
+// Build a canonical `plays` entry from an AI block item. Derives the legacy
+// PASS/RUN field from the detailed action id so filter badges, the playbook
+// prompt serialization, and the legacy animation fallback all agree. Also
+// preserves every field the canvas animator needs.
+function buildPlayFromAIBlock(b, nextNum) {
   if (!b._diagramBase64 && b.formation && b.routePresets) {
     const diagResult = renderNewPlayDiagram(b.formation, b.routePresets, b.playType, b.primaryTarget);
     if (diagResult) {
@@ -6234,38 +6267,37 @@ function addAIPlayToPlaybook(blockIndex) {
       b._diagramData = diagResult.diagramData;
     }
   }
-
-  const nextNum = plays.length > 0 ? Math.max(...plays.map(p => p.num)) + 1 : 1;
   const playName = b.playType.replace(/^New:\s*/, '');
-  const newPlay = {
+  const legacyAction = AI_RUN_ACTION_IDS.has((b.action || '').toLowerCase()) ? 'RUN' : 'PASS';
+  return {
     num: nextNum,
     type: playName,
     variation: b.description || '',
-    action: 'PASS',
+    action: legacyAction,
     customDiagram: b._diagramBase64 || null,
     diagramData: b._diagramData ? JSON.stringify(b._diagramData) : null,
-    C: '',
-    Q: '',
-    W: '',
-    X: '',
-    Y: '',
-    Z: '',
+    C: '', Q: '', W: '', X: '', Y: '', Z: '',
     routeDescriptions: b.routes ? JSON.stringify(b.routes) : '',
     target: b.primaryTarget || '',
-    // Persist the fields the canvas animation needs so the Animate button
-    // works from the Plays detail page and inside a Game, not just from the
-    // ephemeral AI results card.
     formation: b.formation || null,
     routePresets: b.routePresets || null,
     motion: b.motion || null,
     aiAction: b.action || null,
     row: 0
   };
+}
 
+function addAIPlayToPlaybook(blockIndex) {
+  if (!aiCurrentResult || !aiCurrentResult.block || !aiCurrentResult.block[blockIndex]) return;
+  const b = aiCurrentResult.block[blockIndex];
+  if (!b.isNew) return;
+
+  const nextNum = plays.length > 0 ? Math.max(...plays.map(p => p.num)) + 1 : 1;
+  const newPlay = buildPlayFromAIBlock(b, nextNum);
   plays.push(newPlay);
-  if (!playTypes.includes(playName)) playTypes.push(playName);
+  if (!playTypes.includes(newPlay.type)) playTypes.push(newPlay.type);
   savePlays();
-  console.log('Added AI play to playbook:', playName, '(#' + nextNum + '). Total plays:', plays.length);
+  console.log('Added AI play to playbook:', newPlay.type, '(#' + nextNum + '). Total plays:', plays.length);
   showPlay(nextNum);
 }
 
@@ -6401,23 +6433,14 @@ function pushAIBlockToGame(gameId) {
 
   aiCurrentResult.block.forEach(b => {
     if (b.isNew) {
-      // New play — also add to playbook
+      // New play — also add to playbook. Route through the same builder as
+      // addAIPlayToPlaybook so both paths agree on the PASS/RUN field and the
+      // animation data (formation, routePresets, motion, aiAction).
       const playName = b.playType.replace(/^New:\s*/, '');
       let existingPlay = plays.find(p => p.type === playName);
       if (!existingPlay) {
         const nextNum = plays.length > 0 ? Math.max(...plays.map(p => p.num)) + 1 : 1;
-        existingPlay = {
-          num: nextNum,
-          type: playName,
-          variation: b.description || '',
-          action: 'PASS',
-          customDiagram: b._diagramBase64 || null,
-          diagramData: b._diagramData ? JSON.stringify(b._diagramData) : null,
-          C: '', Q: '', W: '', X: '', Y: '', Z: '',
-          routeDescriptions: b.routes ? JSON.stringify(b.routes) : '',
-          target: b.primaryTarget || '',
-          row: 0
-        };
+        existingPlay = buildPlayFromAIBlock(b, nextNum);
         plays.push(existingPlay);
         if (!playTypes.includes(playName)) playTypes.push(playName);
       }
