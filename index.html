@@ -5390,7 +5390,7 @@ function drawStar(ctx, cx, cy, outerR, innerR, points) {
 // ============= PLAY ANIMATION ENGINE =============
 let animState = null; // { formation, routePresets, playName, phase, animT, lastT, af, positions, routeT, primaryTarget }
 
-function showPlayAnimation(formation, routePresets, playName, primaryTarget, motion) {
+function showPlayAnimation(formation, routePresets, playName, primaryTarget, motion, action) {
   const overlay = document.getElementById('animOverlay');
   overlay.classList.add('active');
   document.body.style.overflow = 'hidden';
@@ -5460,6 +5460,7 @@ function showPlayAnimation(formation, routePresets, playName, primaryTarget, mot
   animState = {
     formation, routePresets, playName, formData, primaryTarget,
     motion: validMotion,
+    action: (action || '').toLowerCase(),
     phase: 'idle', animT: 0, lastT: 0, af: null,
     positions: {},
     routeT: 0, snapT: 0, motionT: 0
@@ -5676,6 +5677,140 @@ function animDrawPlayer(ctx, pos, x, y, highlight, primaryTarget) {
   ctx.fillText(pos, x, y);
 }
 
+// Actions whose ball path is a handoff to the primary (primary carries the ball).
+const RUN_ACTIONS = new Set(['sweep', 'reverse']);
+// Actions that include a meaningful fake the coach should see called out.
+const FAKE_ACTIONS = new Set([
+  'play_action', 'halfback_pass', 'flea_flicker',
+  'double_pass', 'throwback', 'reverse'
+]);
+
+function animDrawBall(ctx, x, y) {
+  ctx.save();
+  // Football body
+  ctx.fillStyle = '#7a4a1f';
+  ctx.strokeStyle = '#3d2108';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.ellipse(x, y, 10, 6, 0, 0, Math.PI * 2);
+  ctx.fill(); ctx.stroke();
+  // Laces
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.moveTo(x - 4, y); ctx.lineTo(x + 4, y); ctx.stroke();
+  ctx.lineWidth = 1;
+  for (let i = -2; i <= 2; i++) {
+    ctx.beginPath();
+    ctx.moveTo(x + i, y - 2); ctx.lineTo(x + i, y + 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function animDrawFakeBadge(ctx, x, y, pulse) {
+  ctx.save();
+  const w = 48 * pulse, h = 20 * pulse, r = 5;
+  ctx.fillStyle = 'rgba(220,50,50,0.95)';
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(x - w/2 + r, y - h/2);
+  ctx.lineTo(x + w/2 - r, y - h/2);
+  ctx.quadraticCurveTo(x + w/2, y - h/2, x + w/2, y - h/2 + r);
+  ctx.lineTo(x + w/2, y + h/2 - r);
+  ctx.quadraticCurveTo(x + w/2, y + h/2, x + w/2 - r, y + h/2);
+  ctx.lineTo(x - w/2 + r, y + h/2);
+  ctx.quadraticCurveTo(x - w/2, y + h/2, x - w/2, y + h/2 - r);
+  ctx.lineTo(x - w/2, y - h/2 + r);
+  ctx.quadraticCurveTo(x - w/2, y - h/2, x - w/2 + r, y - h/2);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold ' + Math.round(12 * pulse) + 'px sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('FAKE', x, y + 0.5);
+  ctx.restore();
+}
+
+// Returns { x, y } of the ball in 580-display space, plus optional fake label
+// anchor. Stays at the Center pre-snap, arcs to the QB on the snap, then either
+// (a) hands off to the primary on run plays, or (b) is thrown to the primary
+// on pass plays. Release/handoff timing depends on whether the action carries
+// a fake.
+function animComputeBall(state, scaleY) {
+  const phase = state.phase;
+  const posC = state.positions.C;
+  const posQ = state.positions.Q;
+  const primary = state.primaryTarget && state.positions[state.primaryTarget];
+
+  if (!posC || !posQ) return null;
+
+  const toDisp = p => ({ x: p.x, y: p.y * scaleY });
+
+  if (phase === 'idle' || phase === 'motion') {
+    return { pos: toDisp(posC), fake: null };
+  }
+
+  if (phase === 'snap') {
+    const t = Math.min(1, state.snapT / 400);
+    const cd = toDisp(posC), qd = toDisp(posQ);
+    return {
+      pos: {
+        x: cd.x + (qd.x - cd.x) * t,
+        y: cd.y + (qd.y - cd.y) * t - 14 * Math.sin(Math.PI * t)
+      },
+      fake: null
+    };
+  }
+
+  // Routes or done — compute based on action.
+  const rt = (phase === 'routes') ? state.routeT : 1;
+  const action = state.action;
+  const isRun = RUN_ACTIONS.has(action);
+  const hasFake = FAKE_ACTIONS.has(action);
+  const qd = toDisp(posQ);
+  const pd = primary ? toDisp(primary) : qd;
+
+  // Fake badge window: pulses above the QB for the first third of the play.
+  let fake = null;
+  if (hasFake && rt >= 0.08 && rt <= 0.38) {
+    const u = (rt - 0.08) / 0.30;                 // 0..1 across the window
+    const env = Math.sin(Math.PI * u);             // 0..1..0
+    const pulse = 0.85 + 0.25 * env;
+    fake = { x: qd.x, y: qd.y - 44, pulse };
+  }
+
+  if (isRun) {
+    const HANDOFF_END = 0.18;
+    if (rt < 0.04) {
+      return { pos: qd, fake };
+    }
+    if (rt < HANDOFF_END) {
+      const t = (rt - 0.04) / (HANDOFF_END - 0.04);
+      return {
+        pos: {
+          x: qd.x + (pd.x - qd.x) * t,
+          y: qd.y + (pd.y - qd.y) * t - 12 * Math.sin(Math.PI * t)
+        },
+        fake
+      };
+    }
+    return { pos: pd, fake };
+  }
+
+  // Pass play — ball rides with the QB until release, then arcs to the primary.
+  const release = hasFake ? 0.62 : 0.52;
+  if (rt < release) {
+    return { pos: qd, fake };
+  }
+  const t = Math.min(1, (rt - release) / (1 - release));
+  return {
+    pos: {
+      x: qd.x + (pd.x - qd.x) * t,
+      y: qd.y + (pd.y - qd.y) * t - 70 * Math.sin(Math.PI * t)
+    },
+    fake
+  };
+}
+
 function animRender() {
   if (!animState) return;
   const canvas = document.getElementById('animCanvas');
@@ -5702,6 +5837,11 @@ function animRender() {
     if (!p) return;
     animDrawPlayer(ctx, pos, p.x, p.y * scaleY, false, animState.primaryTarget);
   });
+
+  // Ball + FAKE badge on top of everything else.
+  const ball = animComputeBall(animState, scaleY);
+  if (ball && ball.pos) animDrawBall(ctx, ball.pos.x, ball.pos.y);
+  if (ball && ball.fake) animDrawFakeBadge(ctx, ball.fake.x, ball.fake.y, ball.fake.pulse);
 }
 
 function animLoop(ts) {
@@ -5934,7 +6074,7 @@ function animateAIPlay(blockIndex) {
   if (!aiCurrentResult || !aiCurrentResult.block || !aiCurrentResult.block[blockIndex]) return;
   const b = aiCurrentResult.block[blockIndex];
   if (b.formation && b.routePresets) {
-    showPlayAnimation(b.formation, b.routePresets, b.playType, b.primaryTarget, b.motion);
+    showPlayAnimation(b.formation, b.routePresets, b.playType, b.primaryTarget, b.motion, b.action);
   }
 }
 
@@ -5944,7 +6084,15 @@ function animateAIPlay(blockIndex) {
 function animatePlayFromPlaybook(playNum) {
   const play = plays.find(p => p.num === playNum);
   if (!play || !play.formation || !play.routePresets || !FORMATIONS[play.formation]) return;
-  showPlayAnimation(play.formation, play.routePresets, play.type, play.target, play.motion);
+  // Prefer the detailed AI action; fall back to the legacy PASS/RUN field so
+  // older saved plays still animate the ball sensibly.
+  let action = play.aiAction;
+  if (!action) {
+    const legacy = (play.action || '').toUpperCase();
+    if (legacy === 'RUN') action = 'sweep';
+    else if (legacy === 'PASS') action = 'drop_back';
+  }
+  showPlayAnimation(play.formation, play.routePresets, play.type, play.target, play.motion, action);
 }
 
 function addAIPlayToPlaybook(blockIndex) {
