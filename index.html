@@ -5561,6 +5561,17 @@ function renderNewPlayDiagram(block) {
   });
 
   // 5c. Handoff / fake-handoff / pocket / rollout overlays (below players).
+  // Offset a label perpendicular to a short arrow so it doesn't get covered
+  // by the players at either end.
+  function labelOffsetPerp(from, to, offset) {
+    const dx = to.x - from.x, dy = to.y - from.y;
+    const len = Math.hypot(dx, dy) || 1;
+    // Perpendicular unit vector, rotated so it sits "above" (upfield) the arrow.
+    return {
+      x: (from.x + to.x) / 2 + (-dy / len) * offset,
+      y: (from.y + to.y) / 2 + ( dx / len) * offset
+    };
+  }
   schema.overlays.forEach(ov => {
     if (ov.kind === 'handoff') {
       drawPolyline([ov.from, ov.to], '#1f9d55', 'solid', 3);
@@ -5569,8 +5580,8 @@ function renderNewPlayDiagram(block) {
       ctx.font = '600 11px -apple-system, BlinkMacSystemFont, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      const mx = (ov.from.x + ov.to.x) / 2, my = (ov.from.y + ov.to.y) / 2;
-      ctx.fillText(ov.label, mx, my - 10);
+      const mid = labelOffsetPerp(ov.from, ov.to, -28);
+      ctx.fillText(ov.label, mid.x, mid.y);
     } else if (ov.kind === 'fake_handoff') {
       drawPolyline([ov.from, ov.to], '#d4a017', 'dashed', 3);
       strokeArrowhead(ov.from, ov.to, '#d4a017', 11);
@@ -5578,8 +5589,8 @@ function renderNewPlayDiagram(block) {
       ctx.font = '600 11px -apple-system, BlinkMacSystemFont, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      const mx = (ov.from.x + ov.to.x) / 2, my = (ov.from.y + ov.to.y) / 2;
-      ctx.fillText(ov.label, mx, my - 10);
+      const mid = labelOffsetPerp(ov.from, ov.to, -28);
+      ctx.fillText(ov.label, mid.x, mid.y);
     } else if (ov.kind === 'pocket') {
       drawPolyline([ov.from, ov.to], '#666', 'dashed', 2);
       strokeArrowhead(ov.from, ov.to, '#666', 9);
