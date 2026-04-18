@@ -5493,7 +5493,7 @@ function showPlayAnimation(formation, routePresets, playName, primaryTarget, mot
   animState = {
     formation, routePresets, playName, formData, primaryTarget,
     motion: validMotion,
-    action: (action || '').toLowerCase(),
+    action: normalizeAIAction(action, playName),
     phase: 'idle', animT: 0, lastT: 0, af: null,
     positions: {},
     routeT: 0, snapT: 0, motionT: 0
@@ -5593,14 +5593,22 @@ function animDrawField(ctx, W, H) {
 
 function animDrawRoute(ctx, pos, t, scaleY) {
   if (!animState) return;
-  const preset = animState.routePresets[pos];
-  if (!preset || preset === 'Snap') return;
-  const routeDef = ROUTE_PRESETS[preset];
+  const routeDef = animGetRouteDef(animState, pos);
   if (!routeDef) return;
   const start = animState.formData[pos];
   if (!start) return;
   const pc = posColors[pos];
   const color = pc ? pc.color : '#888';
+
+  // Gate the run carrier's route draw to the handoff — before the handoff the
+  // carrier is stationary, so we should not yet be tracing out a path.
+  const isCarrier = pos === animState.primaryTarget &&
+    (animState.action === 'sweep' || animState.action === 'reverse');
+  if (isCarrier) {
+    const carrierStart = animState.action === 'sweep' ? 0.14 : 0.42;
+    if (t < carrierStart) return;
+    t = (t - carrierStart) / (1 - carrierStart);
+  }
 
   // Build path in animation space
   const path = [{ x: start.x, y: start.y * scaleY }];
@@ -5664,15 +5672,16 @@ function animDrawRoute(ctx, pos, t, scaleY) {
   }
 
   // Route label at 55% if t > 0.5
-  if (t > 0.5 && preset !== 'Block') {
+  const label = routeDef.label;
+  if (t > 0.5 && label) {
     const mp = animInterp(path, 0.55);
     ctx.font = '11px sans-serif';
-    const tw = ctx.measureText(preset).width;
+    const tw = ctx.measureText(label).width;
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.fillRect(mp.x + 12, mp.y - 14, tw + 8, 16);
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     ctx.textAlign = 'left';
-    ctx.fillText(preset, mp.x + 16, mp.y - 4);
+    ctx.fillText(label, mp.x + 16, mp.y - 4);
     ctx.textAlign = 'center';
   }
 }
@@ -5764,10 +5773,91 @@ function animDrawCalloutBadge(ctx, x, y, text, pulse) {
   ctx.restore();
 }
 
+// Map whatever the AI emitted (and a handful of common synonyms) back to one
+// of the canonical action ids. Falls back to a name-based heuristic when the
+// action field is empty or unrecognized — AI responses are surprisingly often
+// sloppy on this, so we guard every downstream consumer with one normalizer.
+const AI_ACTION_CANONICAL = new Set([
+  'drop_back', 'play_action', 'rollout_boot', 'sweep', 'reverse',
+  'halfback_pass', 'double_pass', 'flea_flicker', 'throwback', 'screen'
+]);
+const AI_ACTION_SYNONYMS = {
+  'run': 'sweep', 'handoff': 'sweep', 'pitch': 'sweep',
+  'jet': 'sweep', 'jet_sweep': 'sweep', 'sweep_right': 'sweep', 'sweep_left': 'sweep',
+  'end_around': 'reverse', 'reverse_right': 'reverse', 'reverse_left': 'reverse',
+  'bubble': 'screen', 'bubble_screen': 'screen', 'quick_screen': 'screen',
+  'boot': 'rollout_boot', 'bootleg': 'rollout_boot', 'rollout': 'rollout_boot',
+  'play_pass': 'play_action', 'pa_pass': 'play_action', 'pa': 'play_action',
+  'halfback_throw': 'halfback_pass', 'hb_pass': 'halfback_pass',
+  'flicker': 'flea_flicker', 'flea': 'flea_flicker',
+  'double_throw': 'double_pass',
+  'across_field': 'throwback', 'throw_back': 'throwback',
+  'drop': 'drop_back', 'dropback': 'drop_back', 'pass': 'drop_back'
+};
+function inferActionFromName(name) {
+  const n = (name || '').toLowerCase();
+  if (/reverse|end.?around/.test(n)) return 'reverse';
+  if (/flea.?flick/.test(n)) return 'flea_flicker';
+  if (/halfback.?pass|hb.?pass/.test(n)) return 'halfback_pass';
+  if (/double.?pass/.test(n)) return 'double_pass';
+  if (/throw.?back/.test(n)) return 'throwback';
+  if (/play.?action|\bpa\b/.test(n)) return 'play_action';
+  if (/boot|roll.?out/.test(n)) return 'rollout_boot';
+  if (/bubble|screen/.test(n)) return 'screen';
+  if (/sweep|jet|handoff|\brun\b|draw/.test(n)) return 'sweep';
+  return '';
+}
+function normalizeAIAction(raw, playName) {
+  const s = (raw == null ? '' : String(raw)).toLowerCase().trim().replace(/[-\s]+/g, '_');
+  if (AI_ACTION_CANONICAL.has(s)) return s;
+  if (AI_ACTION_SYNONYMS[s]) return AI_ACTION_SYNONYMS[s];
+  return inferActionFromName(playName);
+}
+
 // Pick the non-primary skill player who serves as the runner / intermediate /
 // fake recipient for this play. Prefer the motion player (most common in
 // youth flag: motion is the handoff key). Otherwise fall back to a W/X/Y/Z
 // running a near-LOS route, then to whoever is closest to the QB.
+// Return the ball carrier's synthesized run path on sweep/reverse, or null
+// when the player isn't the run carrier. The path is a two-segment sweep:
+// a short lateral leg behind the LOS to sell the carry, then a hard cut
+// upfield. Direction matches motion for sweeps and reverses motion for
+// reverses, so the picture agrees with the play schema even when the AI
+// picked a pass route for the carrier in routePresets.
+function animCarrierRunPath(state, pos) {
+  if (!state || pos !== state.primaryTarget) return null;
+  if (state.action !== 'sweep' && state.action !== 'reverse') return null;
+  const start = state.formData && state.formData[pos];
+  if (!start) return null;
+  const CENTER_X = 400;
+  const defaultDir = start.x < CENTER_X ? -1 : 1; // toward near sideline
+  const motionDir = state.motion
+    ? (state.motion.direction === 'right' ? 1 : -1)
+    : defaultDir;
+  const dir = state.action === 'reverse' ? -motionDir : motionDir;
+  return {
+    points: [
+      { dx: 90 * dir, dy: 30 },    // short lateral step behind the LOS
+      { dx: 240 * dir, dy: -320 }  // hard cut upfield, continuing toward the sideline
+    ],
+    type: 'solid',
+    label: state.action === 'reverse' ? 'Reverse' : 'Sweep'
+  };
+}
+
+// Unified route lookup. Returns { points, type, label } for whichever path
+// the player should be drawing this snap — a synthesized run path for the
+// ball carrier on sweep/reverse, otherwise the AI-picked preset.
+function animGetRouteDef(state, pos) {
+  const carrier = animCarrierRunPath(state, pos);
+  if (carrier) return carrier;
+  const preset = state.routePresets && state.routePresets[pos];
+  if (!preset || preset === 'Snap') return null;
+  const def = ROUTE_PRESETS[preset];
+  if (!def) return null;
+  return { points: def.points, type: def.type, label: preset };
+}
+
 function animPickRunner(state) {
   const primary = state.primaryTarget;
   if (state.motion && state.motion.player && state.motion.player !== primary) {
@@ -6046,10 +6136,15 @@ function animLoop(ts) {
     animState.animT += dt;
     animState.routeT = Math.min(1, animState.animT / ROUTE_DUR);
 
-    // Move players along routes
+    // Move players along routes. The ball carrier on sweep/reverse waits at
+    // the handoff spot until they actually receive the ball, then follows a
+    // synthesized sweep path — independent of whatever pass route the AI
+    // happened to pick for them.
+    const carrierStartByAction = { sweep: 0.14, reverse: 0.42 };
+    const carrierStart = carrierStartByAction[animState.action] || 0;
     ['C','Q','W','X','Y','Z'].forEach(pos => {
-      const preset = animState.routePresets[pos];
-      if (!preset || preset === 'Snap') {
+      const routeDef = animGetRouteDef(animState, pos);
+      if (!routeDef) {
         // QB drop back
         if (pos === 'Q' && animState.formData[pos]) {
           const orig = animState.formData[pos];
@@ -6057,14 +6152,25 @@ function animLoop(ts) {
         }
         return;
       }
-      const routeDef = ROUTE_PRESETS[preset];
-      if (!routeDef) return;
       const start = animState.formData[pos];
       if (!start) return;
-      // Build path
+      // For the run carrier, stay put until the handoff completes, then run
+      // the synthesized path over the remaining time.
+      const isCarrier = pos === animState.primaryTarget &&
+        (animState.action === 'sweep' || animState.action === 'reverse');
+      let effT;
+      if (isCarrier) {
+        if (animState.routeT < carrierStart) {
+          animState.positions[pos] = { x: start.x, y: start.y };
+          return;
+        }
+        effT = (animState.routeT - carrierStart) / (1 - carrierStart);
+      } else {
+        effT = animState.routeT;
+      }
       const path = [{ x: start.x, y: start.y }];
       routeDef.points.forEach(p => { path.push({ x: start.x + p.dx, y: start.y + p.dy }); });
-      const cur = animInterp(path, animState.routeT);
+      const cur = animInterp(path, effT);
       animState.positions[pos] = { x: cur.x, y: cur.y };
     });
 
