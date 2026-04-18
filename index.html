@@ -1257,7 +1257,11 @@ async function fullSync() {
       theme:    { get: () => localStorage.getItem('playbook_theme'),    set: v => { localStorage.setItem('playbook_theme', v); document.documentElement.setAttribute('data-theme', v); document.getElementById('themeBtn').innerHTML = v === 'light' ? '&#9728;&#65039;' : '&#127769;'; } },
       ollama_cloud_models: { get: () => localStorage.getItem('playbook_ollama_cloud_models'), set: v => { localStorage.setItem('playbook_ollama_cloud_models', v); } },
       ollama_local_models: { get: () => localStorage.getItem('playbook_ollama_local_models'), set: v => { localStorage.setItem('playbook_ollama_local_models', v); } },
-      ai_settings:   { get: () => localStorage.getItem('playbook_ai_settings'),   set: v => { localStorage.setItem('playbook_ai_settings', v); } }
+      ai_settings:   { get: () => localStorage.getItem('playbook_ai_settings'),   set: v => { localStorage.setItem('playbook_ai_settings', v); } },
+      // AI generation history — every result block (plus its raw model
+      // response + validator output + which model was used) lives here so
+      // we have a persistent record for debugging and cross-device access.
+      ai_history:    { get: () => localStorage.getItem('playbook_ai_history'),    set: v => { localStorage.setItem('playbook_ai_history', v); } }
     };
 
     // If Supabase is empty (first sync ever), push everything from this device
@@ -1378,7 +1382,7 @@ async function initialMigration() {
   if (localStorage.getItem('playbook_sync_init')) return;
   if (!navigator.onLine) return;
   try {
-    const keyMap = { plays: 'playbook_plays', games: 'playbook_games', roster: 'playbook_roster', gamelogs: 'playbook_gamelogs', team_lineup: 'playbook_team_lineup', theme: 'playbook_theme', ollama_cloud_models: 'playbook_ollama_cloud_models', ollama_local_models: 'playbook_ollama_local_models', ai_settings: 'playbook_ai_settings' };
+    const keyMap = { plays: 'playbook_plays', games: 'playbook_games', roster: 'playbook_roster', gamelogs: 'playbook_gamelogs', team_lineup: 'playbook_team_lineup', theme: 'playbook_theme', ollama_cloud_models: 'playbook_ollama_cloud_models', ollama_local_models: 'playbook_ollama_local_models', ai_settings: 'playbook_ai_settings', ai_history: 'playbook_ai_history' };
     const syncMeta = {};
     for (const [sbKey, lsKey] of Object.entries(keyMap)) {
       const raw = localStorage.getItem(lsKey);
@@ -4282,7 +4286,20 @@ function saveAIResult(result) {
   const history = loadAIHistory();
   history.unshift(result);
   if (history.length > 20) history.length = 20;
-  localStorage.setItem('playbook_ai_history', JSON.stringify(history));
+  try { localStorage.setItem('playbook_ai_history', JSON.stringify(history)); }
+  catch(e) { console.warn('Local AI history save failed:', e); }
+  // Bump sync meta so the next continuous-sync cycle pushes to Supabase.
+  try {
+    const meta = JSON.parse(localStorage.getItem('playbook_sync_meta') || '{}');
+    meta.ai_history = new Date().toISOString();
+    localStorage.setItem('playbook_sync_meta', JSON.stringify(meta));
+  } catch(e) {}
+  // Best-effort immediate push so debugging data lands quickly. If this
+  // fails (offline, permissions) the continuous sync will retry.
+  if (typeof pushToSupabase === 'function' && navigator.onLine) {
+    pushToSupabase('ai_history', history).catch(e =>
+      console.warn('Remote AI history push failed (will retry on next sync):', e && e.message));
+  }
 }
 
 // Cached result of the server-side key-configured probe.
@@ -6887,6 +6904,17 @@ async function regenerateSinglePlay(blockIndex) {
     if (parsed.formation !== original.formation) parsed.formation = original.formation;
     if (parsed.primaryTarget !== original.primaryTarget) parsed.primaryTarget = original.primaryTarget;
 
+    // Regeneration diagnostics: model, raw (truncated), previous warnings.
+    const MAX_RAW = 32768;
+    const rawTrimmed = raw.length > MAX_RAW ? raw.slice(0, MAX_RAW) + '…[truncated]' : raw;
+    const settings = loadAISettings();
+    parsed._regenerated = new Date().toISOString();
+    parsed._regenModel = settings.provider === 'anthropic'
+      ? (settings.anthropic && settings.anthropic.model) : settings.provider;
+    parsed._regenRawResponse = rawTrimmed;
+    parsed._regenPreviousWarnings = (original._warnings || [])
+      .filter(w => w.severity === 'critical').map(w => w.code);
+
     coerceAIBlockAction(parsed, null);
     parsed._repairs = repairAIBlock(parsed);
     parsed._warnings = validateAIBlock(parsed).warnings;
@@ -7090,13 +7118,31 @@ async function generatePlayBlock() {
       });
     }
 
-    // Build result object
+    // Build result object. Attach diagnostics so we can debug past
+    // generations from Supabase without having to reproduce them:
+    //   - _model: the model that produced this result
+    //   - _rawResponse: the model's raw text output (truncated)
+    //   - _provider / _playTypeFilter: the coach's settings at gen time
+    // _rawResponse is capped at 32KB so a single pathological response
+    // can't bloat localStorage past its browser-imposed quota.
+    const MAX_RAW = 32768;
+    const rawTrimmed = raw.length > MAX_RAW ? raw.slice(0, MAX_RAW) + '…[truncated]' : raw;
+    const settings = loadAISettings();
     const result = {
       id: 'ai_' + Date.now(),
+      createdAt: new Date().toISOString(),
       defense: defense,
       mode: aiMode,
       overallStrategy: parsed.overallStrategy || '',
-      block: parsed.block || []
+      block: parsed.block || [],
+      _model: settings.provider === 'anthropic'
+        ? (settings.anthropic && settings.anthropic.model)
+        : settings.provider === 'ollama-cloud'
+          ? (settings.ollamaCloud && settings.ollamaCloud.model)
+          : (settings.ollamaLocal && settings.ollamaLocal.model),
+      _provider: settings.provider,
+      _playTypeFilter: aiPlayTypeFilter,
+      _rawResponse: rawTrimmed
     };
 
     showAIResults(result);
