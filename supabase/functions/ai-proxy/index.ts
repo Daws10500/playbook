@@ -91,7 +91,11 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         model: model || "claude-sonnet-4-6",
-        max_tokens: 2048,
+        // Each new-play block is ~4 plays × ~1K tokens of formation + routes
+        // description (detailed per the animation-grammar prompt). 2048 was
+        // clipping mid-JSON; 8192 leaves comfortable headroom without
+        // burning an unbounded budget.
+        max_tokens: 8192,
         system: system || undefined,
         messages: messages,
       }),
