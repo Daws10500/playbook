@@ -2837,7 +2837,9 @@ const PLAY_ACTIONS = [
   { id:'double_pass',  label:'Double Pass',       bucket:'trick', prompt:'Double Pass: QB throws a BACKWARD pass (lateral) to a receiver behind the LOS; that receiver throws the one legal forward pass from behind the LOS.' },
   { id:'flea_flicker', label:'Flea Flicker',      bucket:'trick', prompt:'Flea Flicker: QB hands off/pitches to a runner behind the LOS; runner pitches BACK to the QB; QB throws the one legal forward pass. Uses both laterals of the 2-lateral cap.' },
   { id:'throwback',    label:'Throwback',         bucket:'trick', prompt:'Throwback: offense flows one way (sweep/boot/rollout); the ball carrier or QB throws the one legal forward pass BACK across the field to a delayed backside receiver. Thrower must be behind the LOS.' },
-  { id:'screen',       label:'Screen / Bubble',   bucket:'pass',  prompt:'Screen / Bubble: short forward pass to a receiver at or just behind the LOS (flat or bubble path); catcher runs. No blocking/screening downfield.' }
+  { id:'screen',       label:'Screen / Bubble',   bucket:'pass',  prompt:'Screen / Bubble: short forward pass to a receiver at or just behind the LOS (flat or bubble path); catcher runs. No blocking/screening downfield.' },
+  { id:'cat',          label:'CAT (Quick Throw)', bucket:'pass',  prompt:'CAT: rhythm quick-throw — QB takes the snap, sets, and within ~1.5 seconds throws to a receiver running a short route just past the LOS (Slant, Out, In, Drag, or Flat). Goal is to release the ball before the defense can converge — short, certain catch and run after. The primary target catches the ball forward of the LOS, NOT behind it.' },
+  { id:'cat_and_go',   label:'CAT and GO',        bucket:'pass',  prompt:'CAT and GO (Pump-and-Go): same look as CAT — QB sells a quick rhythm throw with a pump fake — but then resets and throws DEEP. The intended deep receiver runs a CAT-style short stem (head-fake the short break) and then explodes into a Go, Post, or Corner past the bitten defender. One legal forward pass — the short throw is faked, the deep throw is real. Set primaryTarget to the deep receiver and give them routePreset Go, Post, or Corner.' }
 ];
 const PLAY_TYPE_FILTERS = [
   { id:'any',  label:'Any' },
@@ -4135,6 +4137,9 @@ const OLLAMA_LOCAL_RECOMMENDED = [
 let aiMode = 'existing'; // 'existing' or 'suggest'
 let aiPlayTypeFilter = 'any';   // 'any' | 'pass' | 'run' — filters chip list and constrains AI
 let aiActionTags = new Set();   // selected PLAY_ACTIONS ids (empty = no restriction)
+// Coach's freeform request — passed to the AI as a top-priority directive.
+// Persists across renderAI rewrites for the same reason aiSelectedDefense does.
+let aiCoachRequest = '';
 let aiCurrentResult = null;
 // Defense and game-context selections live in module state so they survive
 // the innerHTML rewrite that renderAI does every time the coach toggles a
@@ -4331,7 +4336,7 @@ async function probeAIConfig(force) {
   return aiConfigStatus;
 }
 
-function buildAIPrompt(defense, mode, gameId, playTypeFilter, actionTagIds) {
+function buildAIPrompt(defense, mode, gameId, playTypeFilter, actionTagIds, coachRequest) {
   // Serialize playbook
   let playbookText = 'PLAYBOOK (' + plays.length + ' plays):\n';
   plays.forEach(p => {
@@ -4669,14 +4674,26 @@ ${mode === 'suggest' ? `For new plays, use this format:
   "motion": {"player":"Y","type":"Jet","direction":"right","destination":"wing right outside Z, set to take a jet handoff","description":"Y jet motion right across behind QB, ends as a wing outside Z before the snap"}
 }
 The "motion" field is optional. Omit it if the play has no pre-snap motion. If included: "player" must be W, X, Y, or Z (the WHO); "type" must be one of "Jet" / "Orbit" / "Short"; "direction" must be "left" or "right" and represents the side the motion player ENDS on; "destination" is a short text label of where the motion player lines up at the snap (the WHERE); "description" is one sentence naming both the who and the where.
-The "action" field should be one of: drop_back, play_action, rollout_boot, sweep, reverse, halfback_pass, flea_flicker, throwback, screen. If the coach supplied an "Allowed Actions" list above, you MUST pick exclusively from that list. DO NOT output double_pass — flag football only allows one forward pass; use throwback or halfback_pass instead.` : ''}
+The "action" field should be one of: drop_back, play_action, rollout_boot, sweep, reverse, halfback_pass, flea_flicker, throwback, screen, cat, cat_and_go. If the coach supplied an "Allowed Actions" list above, you MUST pick exclusively from that list. DO NOT output double_pass — flag football only allows one forward pass; use throwback or halfback_pass instead. For action "cat", use a routePreset of Slant / Out / In / Drag / Flat for the primary target (the receiver catches forward of the LOS). For action "cat_and_go", use Go / Post / Corner for the primary target (the short look is a pump fake; the actual throw is deep).` : ''}
 
 Generate a block of 3-5 plays sequenced strategically.`;
 
-  const userMessage = `Defense: ${defense}
+  // Coach's freeform request takes priority over the generic "design 3-5
+  // plays" instruction. If the coach typed something specific ("I want a fake
+  // throw and double reverse"), surface it loudly at the top of the user
+  // message so the model treats it as the primary task.
+  const trimmedRequest = (coachRequest || '').trim();
+  const requestPreface = trimmedRequest
+    ? `COACH'S REQUEST (highest priority — design plays that match this directly): ${trimmedRequest}\n\n`
+    : '';
+  const generationLine = trimmedRequest
+    ? `Generate 3-5 plays that satisfy the coach's request above. Stay within all flag-football legality rules.`
+    : `Generate a strategic play block of 3-5 plays to attack this ${defense} defense.${statsText ? ' Use the game stats to identify which plays have been working and which haven\'t.' : ''}`;
+
+  const userMessage = `${requestPreface}Defense: ${defense}
 ${playbookText}
 ${statsText}
-Generate a strategic play block of 3-5 plays to attack this ${defense} defense.${statsText ? ' Use the game stats to identify which plays have been working and which haven\'t.' : ''}`;
+${generationLine}`;
 
   return { systemPrompt, userMessage };
 }
@@ -5170,9 +5187,9 @@ function renderAI() {
     html += '</div></div>';
 
     // Action-tag chips — filtered by play-type bucket. Every trick play in
-    // the yaml (halfback_pass, double_pass, flea_flicker, throwback) ends with
-    // a forward pass, so they're only offered under Pass. `reverse` is the
-    // only run-variant trick and it's bucketed as 'run' directly.
+    // the yaml (halfback_pass, flea_flicker, throwback) ends with a forward
+    // pass, so they're only offered under Pass. `reverse` is the only
+    // run-variant trick and it's bucketed as 'run' directly.
     html += '<div class="ai-form-group"><label>Allowed Actions <span style="font-weight:400;color:var(--text2);font-size:11px;">(leave empty for all)</span></label>';
     html += '<div class="ai-action-chips">';
     PLAY_ACTIONS.forEach(a => {
@@ -5182,6 +5199,19 @@ function renderAI() {
     });
     html += '</div></div>';
   }
+
+  // Coach chat — freeform "Tell the AI what you want". Highest-priority
+  // directive in the user message; works in both Suggest and Use-My-Playbook
+  // modes. We escape the saved value for the textarea body, but JS state is
+  // updated live via oninput so the value survives the next renderAI rewrite.
+  const requestEscaped = (aiCoachRequest || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  html += '<div class="ai-form-group"><label>Tell the AI what you want <span style="font-weight:400;color:var(--text2);font-size:11px;">(optional)</span></label>';
+  html += '<textarea id="aiCoachRequestInput" rows="3" ' +
+    'placeholder="e.g. I want to run a fake throw and double reverse, or design 3 plays attacking the corner with motion" ' +
+    'oninput="aiCoachRequest = this.value" ' +
+    'style="width:calc(100% - 32px);margin:0 16px 8px;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px;font-family:inherit;resize:vertical;">' +
+    requestEscaped + '</textarea></div>';
 
   // Game context selector
   const selectedGame = aiSelectedGame || '__none__';
@@ -6204,7 +6234,8 @@ function animDrawCalloutBadge(ctx, x, y, text, pulse) {
 // sloppy on this, so we guard every downstream consumer with one normalizer.
 const AI_ACTION_CANONICAL = new Set([
   'drop_back', 'play_action', 'rollout_boot', 'sweep', 'reverse',
-  'halfback_pass', 'double_pass', 'flea_flicker', 'throwback', 'screen'
+  'halfback_pass', 'double_pass', 'flea_flicker', 'throwback', 'screen',
+  'cat', 'cat_and_go'
 ]);
 const AI_ACTION_SYNONYMS = {
   'run': 'sweep', 'handoff': 'sweep', 'pitch': 'sweep',
@@ -6217,7 +6248,9 @@ const AI_ACTION_SYNONYMS = {
   'flicker': 'flea_flicker', 'flea': 'flea_flicker',
   'double_throw': 'double_pass',
   'across_field': 'throwback', 'throw_back': 'throwback',
-  'drop': 'drop_back', 'dropback': 'drop_back', 'pass': 'drop_back'
+  'drop': 'drop_back', 'dropback': 'drop_back', 'pass': 'drop_back',
+  'quick_throw': 'cat', 'rhythm_throw': 'cat', 'now': 'cat',
+  'pump_and_go': 'cat_and_go', 'cat_go': 'cat_and_go', 'pump_go': 'cat_and_go'
 };
 function inferActionFromName(name) {
   const n = (name || '').toLowerCase();
@@ -6229,6 +6262,8 @@ function inferActionFromName(name) {
   if (/play.?action|\bpa\b/.test(n)) return 'play_action';
   if (/boot|roll.?out/.test(n)) return 'rollout_boot';
   if (/bubble|screen/.test(n)) return 'screen';
+  if (/cat[\s-]?(?:and[\s-]?)?go|pump[\s-]?(?:and[\s-]?)?go/.test(n)) return 'cat_and_go';
+  if (/\bcat\b/.test(n)) return 'cat';
   if (/sweep|jet|handoff|\brun\b|draw/.test(n)) return 'sweep';
   return '';
 }
@@ -7434,7 +7469,7 @@ async function generatePlayBlock() {
   showAILoading();
 
   try {
-    const { systemPrompt, userMessage } = buildAIPrompt(defense, aiMode, gameId, aiPlayTypeFilter, aiActionTags);
+    const { systemPrompt, userMessage } = buildAIPrompt(defense, aiMode, gameId, aiPlayTypeFilter, aiActionTags, aiCoachRequest);
     const raw = await callAI(systemPrompt, userMessage);
 
     // Parse JSON — strip markdown fences and surrounding text if present
