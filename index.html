@@ -5489,6 +5489,42 @@ function resolvePlaySchema(block) {
     schema.overlays.push({ kind: 'primary_star', pos: schema.primaryTarget });
   }
 
+  // Clamp every route polyline so the FULL path stays inside the static
+  // diagram's 800×640 play area. Without this, sweeps from a player who
+  // already lines up wide (e.g. X in Bunch Right at x=600) extend past the
+  // right edge — coaches see the line disappear and can't tell where the
+  // route actually ends. We scale the entire polyline uniformly from its
+  // start point so the route's angle/shape is preserved while every point
+  // is brought back inside the canvas.
+  const PLAY_W = 800, PLAY_H = 640;
+  const PLAY_MARGIN_X = 36;
+  const PLAY_MARGIN_TOP = 70;       // leave room for header band + labels
+  const PLAY_MARGIN_BOTTOM = 30;
+  function clampPolylineFromStart(points) {
+    if (!points || points.length < 2) return points;
+    const start = points[0];
+    const minX = PLAY_MARGIN_X, maxX = PLAY_W - PLAY_MARGIN_X;
+    const minY = PLAY_MARGIN_TOP, maxY = PLAY_H - PLAY_MARGIN_BOTTOM;
+    let scale = 1;
+    for (let i = 1; i < points.length; i++) {
+      const p = points[i];
+      const dx = p.x - start.x, dy = p.y - start.y;
+      if (dx > 0) scale = Math.min(scale, (maxX - start.x) / dx);
+      else if (dx < 0) scale = Math.min(scale, (minX - start.x) / dx);
+      if (dy > 0) scale = Math.min(scale, (maxY - start.y) / dy);
+      else if (dy < 0) scale = Math.min(scale, (minY - start.y) / dy);
+    }
+    scale = Math.max(0.15, Math.min(1, scale));
+    if (scale === 1) return points;
+    return points.map((p, i) => i === 0 ? p : ({
+      x: start.x + (p.x - start.x) * scale,
+      y: start.y + (p.y - start.y) * scale
+    }));
+  }
+  Object.values(schema.routes).forEach(route => {
+    if (route && route.points) route.points = clampPolylineFromStart(route.points);
+  });
+
   return schema;
 }
 
@@ -5604,6 +5640,30 @@ function renderNewPlayDiagram(block) {
     ctx.setLineDash([]);
   }
 
+  // Helper: draw a label inside a soft white pill so it stays readable when
+  // routes cross. Snaps the label inside the canvas if it would otherwise
+  // overflow the right or bottom edge.
+  function drawLabelPill(text, x, y, fillColor) {
+    if (!text) return;
+    ctx.font = '700 11px -apple-system, BlinkMacSystemFont, sans-serif';
+    const padX = 5;
+    const tw = ctx.measureText(text).width;
+    const pillW = tw + padX * 2, pillH = 16;
+    let px = x, py = y - pillH / 2;
+    if (px + pillW > W - 6) px = W - 6 - pillW;
+    if (px < 6) px = 6;
+    if (py < 6) py = 6;
+    if (py + pillH > H - 6) py = H - 6 - pillH;
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+    ctx.lineWidth = 1;
+    rrect(px, py, pillW, pillH, 4);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = fillColor || '#222';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(text, px + padX, py + pillH / 2 + 0.5);
+  }
+
   // 5a. Motion arc (under everything else). Dashed to signal pre-snap.
   const motion = schema.overlays.find(o => o.kind === 'motion');
   if (motion) {
@@ -5611,22 +5671,14 @@ function renderNewPlayDiagram(block) {
     const lastSeg = motion.path[motion.path.length - 1];
     const prevSeg = motion.path[motion.path.length - 2];
     strokeArrowhead(prevSeg, lastSeg, motion.color, 12);
-    // Label mid-arc.
     const mid = motion.path[1];
-    ctx.fillStyle = motion.color;
-    ctx.font = '600 12px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
     const arrow = motion.direction === 'left' ? '\u2190' : '\u2192';
-    const whoLabel = motion.player + ' ' + motion.label + ' ' + arrow;
-    ctx.fillText(whoLabel, mid.x + 8, mid.y + 14);
+    drawLabelPill(motion.player + ' ' + motion.label + ' ' + arrow,
+      mid.x + 8, mid.y + 14, motion.color);
     if (motion.destination) {
-      ctx.font = '500 10px -apple-system, BlinkMacSystemFont, sans-serif';
       const endPt = motion.path[motion.path.length - 1];
-      const offsetX = motion.direction === 'left' ? -8 : 8;
-      ctx.textAlign = motion.direction === 'left' ? 'right' : 'left';
-      ctx.fillText('→ ' + motion.destination, endPt.x + offsetX, endPt.y - 14);
-      ctx.textAlign = 'left';
+      const dx = motion.direction === 'left' ? -160 : 8;
+      drawLabelPill('→ ' + motion.destination, endPt.x + dx, endPt.y - 14, motion.color);
     }
   }
 
@@ -5647,12 +5699,9 @@ function renderNewPlayDiagram(block) {
     const last = drawPts[drawPts.length - 1];
     const prev = drawPts[drawPts.length - 2];
     strokeArrowhead(prev, last, route.color, 16);
-    // Route label next to the endpoint.
-    ctx.fillStyle = '#333';
-    ctx.font = '600 11px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(route.label, last.x + 6, last.y - 6);
+    // Route label sits inside a pill at the endpoint so it stays readable
+    // even when a different route's line crosses through.
+    drawLabelPill(route.label, last.x + 8, last.y - 4, route.color);
 
     // Record for saved-play metadata (kept for backwards compat).
     diagramRoutes[pos] = {
@@ -5676,41 +5725,37 @@ function renderNewPlayDiagram(block) {
       y: (from.y + to.y) / 2 + ( dx / len) * offset
     };
   }
+  // Place a handoff/fake-handoff label perpendicular to the exchange line, at
+  // a distance that scales with line length and never sits closer than ~30px
+  // to either player dot (so the green pill isn't obscured by Q or the
+  // ball-carrier on short exchanges).
+  function handoffLabelPos(from, to) {
+    const dx = to.x - from.x, dy = to.y - from.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const offset = Math.max(34, len * 0.45);
+    const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+    return { x: mid.x + (-dy / len) * offset, y: mid.y + (dx / len) * offset };
+  }
   schema.overlays.forEach(ov => {
     if (ov.kind === 'handoff') {
       drawPolyline([ov.from, ov.to], '#1f9d55', 'solid', 3);
       strokeArrowhead(ov.from, ov.to, '#1f9d55', 11);
-      ctx.fillStyle = '#1f9d55';
-      ctx.font = '600 11px -apple-system, BlinkMacSystemFont, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      const mid = labelOffsetPerp(ov.from, ov.to, -28);
-      ctx.fillText(ov.label, mid.x, mid.y);
+      const lp = handoffLabelPos(ov.from, ov.to);
+      drawLabelPill(ov.label, lp.x - 24, lp.y, '#1f9d55');
     } else if (ov.kind === 'fake_handoff') {
       drawPolyline([ov.from, ov.to], '#d4a017', 'dashed', 3);
       strokeArrowhead(ov.from, ov.to, '#d4a017', 11);
-      ctx.fillStyle = '#b5651d';
-      ctx.font = '600 11px -apple-system, BlinkMacSystemFont, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      const mid = labelOffsetPerp(ov.from, ov.to, -28);
-      ctx.fillText(ov.label, mid.x, mid.y);
+      const lp = handoffLabelPos(ov.from, ov.to);
+      drawLabelPill(ov.label, lp.x - 24, lp.y, '#b5651d');
     } else if (ov.kind === 'pocket') {
       drawPolyline([ov.from, ov.to], '#666', 'dashed', 2);
       strokeArrowhead(ov.from, ov.to, '#666', 9);
-      ctx.fillStyle = '#666';
-      ctx.font = '600 10px -apple-system, BlinkMacSystemFont, sans-serif';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('drop', ov.to.x + 8, ov.to.y);
+      drawLabelPill('drop', ov.to.x + 6, ov.to.y, '#666');
     } else if (ov.kind === 'rollout') {
       drawPolyline([ov.from, ov.to], '#666', 'solid', 3);
       strokeArrowhead(ov.from, ov.to, '#666', 10);
-      ctx.fillStyle = '#666';
-      ctx.font = '600 10px -apple-system, BlinkMacSystemFont, sans-serif';
-      ctx.textAlign = ov.to.x > ov.from.x ? 'left' : 'right';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('boot', ov.to.x + (ov.to.x > ov.from.x ? 6 : -6), ov.to.y + 4);
+      const lx = ov.to.x + (ov.to.x > ov.from.x ? 6 : -34);
+      drawLabelPill('boot', lx, ov.to.y + 4, '#666');
     }
   });
 
