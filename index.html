@@ -2845,18 +2845,29 @@ const PLAY_TYPE_FILTERS = [
   { id:'run',  label:'Run' }
 ];
 
+// Visual offsets for each preset, drawn from the player's start position.
+// Coordinate convention: -dy is UPFIELD (toward the LOS / opponent end zone),
+// +dy is INTO THE BACKFIELD. So every receiver route MUST have a final point
+// with negative dy — a "Flat" route is a short release at 1-3 yards' depth
+// to the sideline (slightly upfield), not a backwards drift. See the standard
+// gridiron route tree: https://en.wikipedia.org/wiki/Route_(gridiron_football)
 const ROUTE_PRESETS = {
-  'Slant': { points:[{dx:0,dy:-40},{dx:80,dy:-200}], type:'solid' },
-  'Out': { points:[{dx:0,dy:-120},{dx:120,dy:-120}], type:'solid' },
-  'In': { points:[{dx:0,dy:-120},{dx:-120,dy:-120}], type:'solid' },
-  'Go': { points:[{dx:0,dy:-300}], type:'solid' },
-  'Post': { points:[{dx:0,dy:-160},{dx:-70,dy:-300}], type:'solid' },
+  'Slant':  { points:[{dx:0,dy:-40},{dx:80,dy:-200}], type:'solid' },
+  'Out':    { points:[{dx:0,dy:-120},{dx:120,dy:-120}], type:'solid' },
+  'In':     { points:[{dx:0,dy:-120},{dx:-120,dy:-120}], type:'solid' },
+  'Go':     { points:[{dx:0,dy:-300}], type:'solid' },
+  'Post':   { points:[{dx:0,dy:-160},{dx:-70,dy:-300}], type:'solid' },
   'Corner': { points:[{dx:0,dy:-160},{dx:100,dy:-300}], type:'solid' },
-  'Curl': { points:[{dx:0,dy:-180},{dx:0,dy:-150}], type:'solid' },
-  'Drag': { points:[{dx:0,dy:-30},{dx:200,dy:-30}], type:'solid' },
-  'Wheel': { points:[{dx:-50,dy:-30},{dx:-50,dy:-280}], type:'solid' },
-  'Flat': { points:[{dx:100,dy:20}], type:'solid' },
-  'Screen': { points:[{dx:30,dy:40},{dx:80,dy:20}], type:'dashed' },
+  'Curl':   { points:[{dx:0,dy:-180},{dx:0,dy:-150}], type:'solid' },
+  'Drag':   { points:[{dx:0,dy:-30},{dx:200,dy:-30}], type:'solid' },
+  'Wheel':  { points:[{dx:-50,dy:-30},{dx:-50,dy:-280}], type:'solid' },
+  // Flat: quick release to the sideline at 1-3 yards' depth — the route is
+  // forward (negative dy), never a backwards drift into the backfield.
+  'Flat':   { points:[{dx:30,dy:-25},{dx:130,dy:-25}], type:'solid' },
+  // Screen: receiver settles at or just behind the LOS to catch — small
+  // backward step is intentional (bubble), but the catch point is essentially
+  // on the LOS (dy ≈ 0), not 2 yds deep in the backfield.
+  'Screen': { points:[{dx:30,dy:10},{dx:90,dy:0}], type:'dashed' },
 };
 
 // ============= RECEIVER ROUTE TREE =============
@@ -4598,7 +4609,19 @@ Mark new plays with isNew: true.
 For every new PASS play, you MUST include primaryTarget (W, X, Y, Z, or C). For RUN plays, set primaryTarget to the ball carrier.
 
 FORMATIONS available: Spread, Trips Right, Trips Left, Bunch Right, Bunch Left, Twins, Deuce
-ROUTE PRESETS available: Slant, Out, In, Go, Post, Corner, Curl, Drag, Wheel, Flat, Screen
+ROUTE PRESETS available — pick the preset whose SHAPE matches what you describe in routes[pos]. These shapes follow the standard gridiron route tree (https://en.wikipedia.org/wiki/Route_(gridiron_football)). EVERY route below releases UPFIELD past the LOS; none of them drift backwards into the backfield:
+- Flat: quick release at 1-3 yds depth then break to the sideline (a forward-flat, NOT a backwards drift). Good as a checkdown / safety valve out of the backfield.
+- Slant: 2-3 step vertical release then sharp diagonal cut INSIDE across the middle.
+- Out: vertical release ~5-7 yds then 90° break to the sideline.
+- In / Dig: vertical release ~5-7 yds then 90° break across the middle inside.
+- Curl: vertical release ~8-10 yds, plant, and turn back to face the QB (sit-down route).
+- Drag / Shallow Cross: 1-2 yd release then run flat across the formation underneath.
+- Corner: vertical release ~8 yds then angled break toward the sideline pylon (deep out).
+- Post: vertical release ~8 yds then angled break toward the goalpost (deep in).
+- Wheel: short out-release then turn straight upfield along the sideline (looks like a wheel from the backfield).
+- Go / Fade: straight vertical release, deep sideline shot.
+- Screen: short forward pass caught AT or just behind the LOS (bubble/quick screen). Use ONLY for screen action — the receiver settles on the LOS, not 2 yds in the backfield.
+NEVER use a preset whose shape contradicts the described route. If you describe a "deep crossing route" pick Drag at depth or In/Dig — never Flat. If you describe a "comeback to the QB" pick Curl. If you describe a "short angle out" pick Out. If you describe a "swing route from the backfield" pick Flat. Match the SHAPE to the WORDS.
 CRITICAL RULE — NO BLOCKING (RE-READ IF NEEDED): Flag football does NOT allow blocking, chipping, sealing, walling off, shielding, or pass protection. Never use "Block" as a route preset or action. Every non-QB player either runs a route past the LOS or handles the ball behind the LOS as a ball carrier. If your route description uses the words block/chip/seal/shield/pass-pro/pick-contact, you are WRONG — rewrite it.
 CRITICAL RULE — THE CENTER RELEASES AS A RECEIVER: The Center is NEVER a blocker. After the snap, the Center releases on a short route — pick one of Slant, Drag, Curl, Flat, or In. Never describe the Center as blocking, chipping, shielding, staying in, walling off the middle, or anything similar.
 CRITICAL RULE — BEHIND THE LOS IS A RUN, NOT A ROUTE: If a player receives the ball at or behind the line of scrimmage (handoff, pitch, sweep, reverse, or bubble screen) they are running, not running a route. Use a run action (Handoff / Sweep / Reverse / Pitch) in the route description for those players, not a route tree label. Only use a route preset (Slant / Out / Go / Post / Corner / Curl / Drag / Wheel / Flat / Screen / In) for a player who releases downfield past the LOS as a pass target.
