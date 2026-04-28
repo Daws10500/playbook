@@ -3103,7 +3103,6 @@ function selectRoutePreset(name) {
 
   // Remove existing route for this player
   if (deRoutes[pos]) {
-    if (deRoutes[pos].arrow._blockBar) deRoutes[pos].arrow._blockBar.destroy();
     deRoutes[pos].arrow.destroy();
   }
 
@@ -3138,7 +3137,6 @@ function handleStageTap(e) {
 
   // Remove old route and redraw with new waypoints
   if (deRoutes[pos]) {
-    if (deRoutes[pos].arrow._blockBar) deRoutes[pos].arrow._blockBar.destroy();
     deRoutes[pos].arrow.destroy();
   }
   const routePoints = [0, 0, ...deTapWaypoints];
@@ -3162,32 +3160,15 @@ function drawRouteArrow(pos, points, type) {
     absPoints.push(py + points[i+1]);
   }
 
-  let arrow;
-  if (type === 'block') {
-    arrow = new Konva.Line({
-      points: absPoints,
-      stroke: color, strokeWidth: 4,
-      lineCap: 'round', lineJoin: 'round'
-    });
-    // Add a small perpendicular line at end for block symbol
-    const endX = absPoints[absPoints.length - 2];
-    const endY = absPoints[absPoints.length - 1];
-    const blockBar = new Konva.Line({
-      points: [endX - 10, endY, endX + 10, endY],
-      stroke: color, strokeWidth: 4, lineCap: 'round'
-    });
-    deLayerRoutes.add(blockBar);
-    // Store reference to block bar for cleanup
-    arrow._blockBar = blockBar;
-  } else {
-    arrow = new Konva.Arrow({
-      points: absPoints,
-      stroke: color, strokeWidth: 3,
-      fill: color, pointerLength: 10, pointerWidth: 8,
-      lineCap: 'round', lineJoin: 'round',
-      dash: type === 'dashed' ? [10, 6] : undefined
-    });
-  }
+  // Flag football has no blocking — every drawn route is an arrow (solid or
+  // pre-snap dashed). The 'block' bar/no-arrow style is intentionally absent.
+  const arrow = new Konva.Arrow({
+    points: absPoints,
+    stroke: color, strokeWidth: 3,
+    fill: color, pointerLength: 10, pointerWidth: 8,
+    lineCap: 'round', lineJoin: 'round',
+    dash: type === 'dashed' ? [10, 6] : undefined
+  });
 
   deLayerRoutes.add(arrow);
   deRoutes[pos] = { arrow, points: [...points], type };
@@ -3209,13 +3190,6 @@ function updateRouteForPlayer(pos) {
     absPoints.push(py + route.points[i+1]);
   }
   route.arrow.points(absPoints);
-
-  // Update block bar position if exists
-  if (route.arrow._blockBar) {
-    const endX = absPoints[absPoints.length - 2];
-    const endY = absPoints[absPoints.length - 1];
-    route.arrow._blockBar.points([endX - 10, endY, endX + 10, endY]);
-  }
   deLayerRoutes.draw();
 }
 
@@ -4632,12 +4606,13 @@ For the QB position, always use "Snap" for pocket passing (no route drawn). QB C
 For the Center, pick a short route like Slant, Drag, Curl, or Flat — the Center snaps the ball and then releases as a receiver.
 
 PRE-SNAP MOTION (use when it helps the concept):
-- Exactly one player may be in motion at the snap. Pick ONE of W, X, Y, or Z (never C or Q).
+- Exactly one player may be in motion at the snap. Pick ONE of W, X, Y, or Z (never C or Q). The "player" field IS the WHO — the single position letter of the player going in motion.
 - Motion is STRICTLY LATERAL (parallel to the LOS) or moves BACKWARD away from the LOS. The motion player must remain BEHIND the LOS for the entire motion — they do NOT cross or touch the line of scrimmage pre-snap. The motion player only crosses the LOS after the snap, and only as part of their post-snap route or handoff.
 - The motion path MUST run BEHIND the Center and the QB (deeper than the QB), never in front of or on top of the Center. The motion player ALWAYS ENDS on the opposite side of the formation from where they started — motion switches the formation strength.
 - Supported motion types: "Jet" (wide sweep across behind QB), "Orbit" (arc behind QB), "Short" (compact cross behind QB). All three cross to the opposite side; they differ only in tempo/feel.
+- WHERE THEY ARE MOTIONING TO — the "direction" field is the side of the formation the motion player ENDS on (left or right), NOT the direction they came from. A player starting on the left who motions across to the right uses direction:"right". The "destination" field is a short text label of the landing spot/role at the snap (e.g. "wing right outside Z", "tight slot left next to C", "behind QB ready for jet handoff", "stacked over Y at right hash").
 - Never describe motion using words like "up to the LOS," "toward the line," "across the line pre-snap," "press the LOS," "creep forward," "in front of the center," or anything that implies forward or same-side motion.
-- Include a short human-readable description so the coach can see what the motion is.
+- Include a short human-readable description so the coach can see what the motion is. The description must clearly name WHO is in motion (by position letter) and WHERE they are going (direction + landing spot).
 
 You MUST include "formation" and "routePresets" for every new play. Include "motion" whenever the concept uses pre-snap motion.` : 'MODE: Only select plays from the existing playbook. Do NOT invent new plays.'}
 
@@ -4668,9 +4643,9 @@ ${mode === 'suggest' ? `For new plays, use this format:
   "action": "screen",
   "routePresets": {"C":"Slant","Q":"Snap","W":"Go","X":"Screen","Y":"Drag","Z":"Curl"},
   "routes": {"C":"Snap then release on a quick slant","Q":"Drop back, read screen","W":"Go route","X":"Screen route - settle in flat","Y":"Crossing route","Z":"Curl back to QB"},
-  "motion": {"player":"Y","type":"Jet","direction":"right","description":"Y jet motion right across behind QB before the snap"}
+  "motion": {"player":"Y","type":"Jet","direction":"right","destination":"wing right outside Z, set to take a jet handoff","description":"Y jet motion right across behind QB, ends as a wing outside Z before the snap"}
 }
-The "motion" field is optional. Omit it if the play has no pre-snap motion. If included, player must be W, X, Y, or Z; type must be one of "Jet" / "Orbit" / "Short"; direction must be "left" or "right".
+The "motion" field is optional. Omit it if the play has no pre-snap motion. If included: "player" must be W, X, Y, or Z (the WHO); "type" must be one of "Jet" / "Orbit" / "Short"; "direction" must be "left" or "right" and represents the side the motion player ENDS on; "destination" is a short text label of where the motion player lines up at the snap (the WHERE); "description" is one sentence naming both the who and the where.
 The "action" field should be one of: drop_back, play_action, rollout_boot, sweep, reverse, halfback_pass, flea_flicker, throwback, screen. If the coach supplied an "Allowed Actions" list above, you MUST pick exclusively from that list. DO NOT output double_pass — flag football only allows one forward pass; use throwback or halfback_pass instead.` : ''}
 
 Generate a block of 3-5 plays sequenced strategically.`;
@@ -5337,8 +5312,7 @@ function resolvePlaySchema(block) {
       color: start.color,
       label: (block.motion.type || 'Jet'),
       direction: schema._validatedMotionDir,
-      // Step-off-the-LOS then slide laterally — matches the animation's
-      // motion-phase lane so the static diagram and animation agree.
+      destination: block.motion.destination || '',
       path: [
         { x: start.x, y: start.y },
         { x: start.x, y: motionY },
@@ -5644,7 +5618,16 @@ function renderNewPlayDiagram(block) {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     const arrow = motion.direction === 'left' ? '\u2190' : '\u2192';
-    ctx.fillText(motion.label + ' ' + arrow, mid.x + 8, mid.y + 14);
+    const whoLabel = motion.player + ' ' + motion.label + ' ' + arrow;
+    ctx.fillText(whoLabel, mid.x + 8, mid.y + 14);
+    if (motion.destination) {
+      ctx.font = '500 10px -apple-system, BlinkMacSystemFont, sans-serif';
+      const endPt = motion.path[motion.path.length - 1];
+      const offsetX = motion.direction === 'left' ? -8 : 8;
+      ctx.textAlign = motion.direction === 'left' ? 'right' : 'left';
+      ctx.fillText('→ ' + motion.destination, endPt.x + offsetX, endPt.y - 14);
+      ctx.textAlign = 'left';
+    }
   }
 
   // 5b. Per-player route arrows (below player dots).
@@ -6033,24 +6016,16 @@ function animDrawRoute(ctx, pos, t, scaleY) {
   }
   ctx.stroke(); ctx.setLineDash([]);
 
-  // Arrowhead at current end (if t > 0.15)
+  // Arrowhead at current end (if t > 0.15). Flag football has no blocks, so
+  // every route ends in a directional arrow — never a perpendicular block bar.
   if (t > 0.15) {
     const angle = Math.atan2(endY - prevY, endX - prevX);
-    if (routeDef.type === 'block') {
-      const barLen = 12, perp = angle + Math.PI / 2;
-      ctx.strokeStyle = color; ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(endX + Math.cos(perp) * barLen, endY + Math.sin(perp) * barLen);
-      ctx.lineTo(endX - Math.cos(perp) * barLen, endY - Math.sin(perp) * barLen);
-      ctx.stroke();
-    } else {
-      const aLen = 12, aAng = Math.PI / 6;
-      ctx.fillStyle = color;
-      ctx.beginPath(); ctx.moveTo(endX, endY);
-      ctx.lineTo(endX - aLen * Math.cos(angle - aAng), endY - aLen * Math.sin(angle - aAng));
-      ctx.lineTo(endX - aLen * Math.cos(angle + aAng), endY - aLen * Math.sin(angle + aAng));
-      ctx.closePath(); ctx.fill();
-    }
+    const aLen = 12, aAng = Math.PI / 6;
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.moveTo(endX, endY);
+    ctx.lineTo(endX - aLen * Math.cos(angle - aAng), endY - aLen * Math.sin(angle - aAng));
+    ctx.lineTo(endX - aLen * Math.cos(angle + aAng), endY - aLen * Math.sin(angle + aAng));
+    ctx.closePath(); ctx.fill();
   }
 
   // Route label at 55% if t > 0.5
@@ -6382,6 +6357,20 @@ function validateAIBlock(b) {
       } else if (nameLeft && b.motion.direction === 'right') {
         warn('motion_dir_mismatch', `${name}: motion goes right but name says left`);
       }
+    }
+  }
+
+  // 2d. If motion is included, it must clearly identify WHO and WHERE.
+  if (b.motion && (b.motion.player || b.motion.direction || b.motion.type || b.motion.destination)) {
+    const m = b.motion;
+    if (!m.player || !['W','X','Y','Z'].includes(m.player)) {
+      critical('motion_who_missing', `${name}: motion is set but "player" is missing or not W/X/Y/Z`);
+    }
+    if (!m.direction || !['left','right'].includes(m.direction)) {
+      critical('motion_where_missing', `${name}: motion is set but "direction" must be "left" or "right" (the side the motion player ENDS on)`);
+    }
+    if (!m.destination || !m.destination.trim()) {
+      warn('motion_destination_missing', `${name}: motion has no "destination" text — coaches can't see where the motion player lands`);
     }
   }
 
